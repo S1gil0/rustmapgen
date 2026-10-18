@@ -1,0 +1,11 @@
+# What an install makes: the game, steamcmd, the Python environment and every map.
+/game/
+/steamcmd/
+/data/
+/.venv/
+# Build output of the mod (mod/prebuilt is kept)
+/mod/bin/
+/mod/obj/
+/mod/build/
+__pycache__/
+*.pyc

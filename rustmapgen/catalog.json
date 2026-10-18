@@ -1,0 +1,1182 @@
+{
+ "monuments": [
+  {
+   "prefab": "compound",
+   "path": "autospawn/monument/medium/compound.prefab",
+   "folder": "medium",
+   "label": "Outpost",
+   "group": "Safe zones",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "Tier1",
+   "type": "Town",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "bandit_town",
+   "path": "autospawn/monument/medium/bandit_town.prefab",
+   "folder": "medium",
+   "label": "Bandit Camp",
+   "group": "Safe zones",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "Tier1",
+   "type": "Town",
+   "biomes": [
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "fishing_village_a",
+   "path": "autospawn/monument/fishing_village/fishing_village_a.prefab",
+   "folder": "fishing_village",
+   "label": "Fishing Village A",
+   "group": "Safe zones",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra",
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "fishing_village_b",
+   "path": "autospawn/monument/fishing_village/fishing_village_b.prefab",
+   "folder": "fishing_village",
+   "label": "Fishing Village B",
+   "group": "Safe zones",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "3",
+   "type": "Radtown",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra",
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "fishing_village_c",
+   "path": "autospawn/monument/fishing_village/fishing_village_c.prefab",
+   "folder": "fishing_village",
+   "label": "Fishing Village C",
+   "group": "Safe zones",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "3",
+   "type": "Radtown",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra",
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "stables_a",
+   "path": "autospawn/monument/small/stables_a.prefab",
+   "folder": "small",
+   "label": "Ranch",
+   "group": "Safe zones",
+   "game_min_world_size": 0,
+   "game_priority": "High",
+   "tier": "Tier0",
+   "type": "Town",
+   "biomes": [
+    "Temperate"
+   ]
+  },
+  {
+   "prefab": "stables_b",
+   "path": "autospawn/monument/small/stables_b.prefab",
+   "folder": "small",
+   "label": "Large Barn",
+   "group": "Safe zones",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier1",
+   "type": "Town",
+   "biomes": [
+    "Temperate"
+   ]
+  },
+  {
+   "prefab": "airfield_1",
+   "path": "autospawn/monument/large/airfield_1.prefab",
+   "folder": "large",
+   "label": "Airfield",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier1",
+   "type": "Airport",
+   "biomes": "any"
+  },
+  {
+   "prefab": "junkyard_1",
+   "path": "autospawn/monument/medium/junkyard_1.prefab",
+   "folder": "medium",
+   "label": "Junkyard",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "High",
+   "tier": "3",
+   "type": "Radtown",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "launch_site_1",
+   "path": "autospawn/monument/xlarge/launch_site_1.prefab",
+   "folder": "xlarge",
+   "label": "Launch Site",
+   "group": "Large monuments",
+   "game_min_world_size": 3500,
+   "game_priority": "Highest",
+   "tier": "Tier2",
+   "type": "Town",
+   "biomes": "any"
+  },
+  {
+   "prefab": "military_tunnel_1",
+   "path": "autospawn/monument/large/military_tunnel_1.prefab",
+   "folder": "large",
+   "label": "Military Tunnels",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier2",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "powerplant_1",
+   "path": "autospawn/monument/large/powerplant_1.prefab",
+   "folder": "large",
+   "label": "Power Plant",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "Tier2",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "trainyard_1",
+   "path": "autospawn/monument/large/trainyard_1.prefab",
+   "folder": "large",
+   "label": "Train Yard",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier1",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "water_treatment_plant_1",
+   "path": "autospawn/monument/large/water_treatment_plant_1.prefab",
+   "folder": "large",
+   "label": "Water Treatment",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "Tier1",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "sphere_tank",
+   "path": "autospawn/monument/small/sphere_tank.prefab",
+   "folder": "small",
+   "label": "The Dome",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier1",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "satellite_dish",
+   "path": "autospawn/monument/small/satellite_dish.prefab",
+   "folder": "small",
+   "label": "Satellite Dish",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier1",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "nuclear_missile_silo",
+   "path": "autospawn/monument/medium/nuclear_missile_silo.prefab",
+   "folder": "medium",
+   "label": "Missile Silo",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "6",
+   "type": "Radtown",
+   "biomes": [
+    "Arid",
+    "Temperate"
+   ]
+  },
+  {
+   "prefab": "radtown_1",
+   "path": "autospawn/monument/roadside/radtown_1.prefab",
+   "folder": "roadside",
+   "label": "Radtown",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "-1",
+   "type": "Roadside",
+   "biomes": [
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "jungle_ziggurat_a",
+   "path": "autospawn/monument/jungle_ruins/jungle_ziggurat_a.prefab",
+   "folder": "jungle_ruins",
+   "label": "Ziggurat",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": [
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "apartments_complex_1",
+   "path": "autospawn/monument/medium/apartments_complex_1.prefab",
+   "folder": "medium",
+   "label": "Apartments",
+   "group": "Large monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "Tier0",
+   "type": "Town",
+   "biomes": [
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "excavator_1",
+   "path": "autospawn/monument/large/excavator_1.prefab",
+   "folder": "large",
+   "label": "Giant Excavator",
+   "group": "Large monuments",
+   "game_min_world_size": 3500,
+   "game_priority": "High",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Arid"
+   ]
+  },
+  {
+   "prefab": "gas_station_1",
+   "path": "autospawn/monument/roadside/gas_station_1.prefab",
+   "folder": "roadside",
+   "label": "Gas Station",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Roadside",
+   "biomes": "any"
+  },
+  {
+   "prefab": "supermarket_1",
+   "path": "autospawn/monument/roadside/supermarket_1.prefab",
+   "folder": "roadside",
+   "label": "Supermarket",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Roadside",
+   "biomes": "any"
+  },
+  {
+   "prefab": "warehouse",
+   "path": "autospawn/monument/roadside/warehouse.prefab",
+   "folder": "roadside",
+   "label": "Mining Outpost",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Roadside",
+   "biomes": "any"
+  },
+  {
+   "prefab": "lighthouse",
+   "path": "autospawn/monument/lighthouse/lighthouse.prefab",
+   "folder": "lighthouse",
+   "label": "Lighthouse",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier0",
+   "type": "Lighthouse",
+   "biomes": "any"
+  },
+  {
+   "prefab": "radtown_small_3",
+   "path": "autospawn/monument/medium/radtown_small_3.prefab",
+   "folder": "medium",
+   "label": "Sewer Branch",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier1",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "swamp_a",
+   "path": "autospawn/monument/swamp/swamp_a.prefab",
+   "folder": "swamp",
+   "label": "Swamp A",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "swamp_b",
+   "path": "autospawn/monument/swamp/swamp_b.prefab",
+   "folder": "swamp",
+   "label": "Swamp B",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "swamp_c",
+   "path": "autospawn/monument/swamp/swamp_c.prefab",
+   "folder": "swamp",
+   "label": "Swamp C",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier0",
+   "type": "Radtown",
+   "biomes": [
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "desert_military_base_a",
+   "path": "autospawn/monument/military_bases/desert_military_base_a.prefab",
+   "folder": "military_bases",
+   "label": "Desert Military Base A",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Arid"
+   ]
+  },
+  {
+   "prefab": "desert_military_base_b",
+   "path": "autospawn/monument/military_bases/desert_military_base_b.prefab",
+   "folder": "military_bases",
+   "label": "Desert Military Base B",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Arid"
+   ]
+  },
+  {
+   "prefab": "desert_military_base_c",
+   "path": "autospawn/monument/military_bases/desert_military_base_c.prefab",
+   "folder": "military_bases",
+   "label": "Desert Military Base C",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Arid"
+   ]
+  },
+  {
+   "prefab": "desert_military_base_d",
+   "path": "autospawn/monument/military_bases/desert_military_base_d.prefab",
+   "folder": "military_bases",
+   "label": "Desert Military Base D",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Arid"
+   ]
+  },
+  {
+   "prefab": "arctic_research_base_a",
+   "path": "autospawn/monument/arctic_bases/arctic_research_base_a.prefab",
+   "folder": "arctic_bases",
+   "label": "Arctic Research Base",
+   "group": "Small monuments",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "-1",
+   "type": "Radtown",
+   "biomes": [
+    "Arctic"
+   ]
+  },
+  {
+   "prefab": "harbor_2",
+   "path": "autospawn/monument/harbor/harbor_2.prefab",
+   "folder": "harbor",
+   "label": "Small Harbor",
+   "group": "Harbors",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "3",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "harbor_1",
+   "path": "autospawn/monument/harbor/harbor_1.prefab",
+   "folder": "harbor",
+   "label": "Large Harbor",
+   "group": "Harbors",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "3",
+   "type": "Radtown",
+   "biomes": "any"
+  },
+  {
+   "prefab": "ferry_terminal_1",
+   "path": "autospawn/monument/harbor/ferry_terminal_1.prefab",
+   "folder": "harbor",
+   "label": "Ferry Terminal",
+   "group": "Harbors",
+   "game_min_world_size": 0,
+   "game_priority": "High",
+   "tier": "3",
+   "type": "Radtown",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra"
+   ]
+  },
+  {
+   "prefab": "oilrig_1",
+   "path": "autospawn/monument/offshore/oilrig_1.prefab",
+   "folder": "offshore",
+   "label": "Large Oil Rig",
+   "group": "Oil rigs",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "6",
+   "type": "Building",
+   "biomes": "any"
+  },
+  {
+   "prefab": "oilrig_2",
+   "path": "autospawn/monument/offshore/oilrig_2.prefab",
+   "folder": "offshore",
+   "label": "Oil Rig",
+   "group": "Oil rigs",
+   "game_min_world_size": 0,
+   "game_priority": "Highest",
+   "tier": "6",
+   "type": "Building",
+   "biomes": "any"
+  },
+  {
+   "prefab": "mining_quarry_a",
+   "path": "autospawn/monument/small/mining_quarry_a.prefab",
+   "folder": "small",
+   "label": "Sulfur Quarry",
+   "group": "Quarries",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier2",
+   "type": "Building",
+   "biomes": "any"
+  },
+  {
+   "prefab": "mining_quarry_b",
+   "path": "autospawn/monument/small/mining_quarry_b.prefab",
+   "folder": "small",
+   "label": "Stone Quarry",
+   "group": "Quarries",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier2",
+   "type": "Building",
+   "biomes": "any"
+  },
+  {
+   "prefab": "mining_quarry_c",
+   "path": "autospawn/monument/small/mining_quarry_c.prefab",
+   "folder": "small",
+   "label": "HQM Quarry",
+   "group": "Quarries",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "Tier2",
+   "type": "Building",
+   "biomes": "any"
+  },
+  {
+   "prefab": "water_well_a",
+   "path": "autospawn/monument/tiny/water_well_a.prefab",
+   "folder": "tiny",
+   "label": "Water Well A",
+   "group": "Water wells",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "WaterWell",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra",
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "water_well_b",
+   "path": "autospawn/monument/tiny/water_well_b.prefab",
+   "folder": "tiny",
+   "label": "Water Well B",
+   "group": "Water wells",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "WaterWell",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra",
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "water_well_c",
+   "path": "autospawn/monument/tiny/water_well_c.prefab",
+   "folder": "tiny",
+   "label": "Water Well C",
+   "group": "Water wells",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "WaterWell",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra",
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "water_well_d",
+   "path": "autospawn/monument/tiny/water_well_d.prefab",
+   "folder": "tiny",
+   "label": "Water Well D",
+   "group": "Water wells",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "WaterWell",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra",
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "water_well_e",
+   "path": "autospawn/monument/tiny/water_well_e.prefab",
+   "folder": "tiny",
+   "label": "Water Well E",
+   "group": "Water wells",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "WaterWell",
+   "biomes": [
+    "Arid",
+    "Temperate",
+    "Tundra",
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "cave_large_hard",
+   "path": "autospawn/monument/cave/cave_large_hard.prefab",
+   "folder": "cave",
+   "label": "Cave Large Hard",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "cave_large_medium",
+   "path": "autospawn/monument/cave/cave_large_medium.prefab",
+   "folder": "cave",
+   "label": "Cave Large Medium",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "cave_large_sewers_hard",
+   "path": "autospawn/monument/cave/cave_large_sewers_hard.prefab",
+   "folder": "cave",
+   "label": "Cave Large Sewers Hard",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "cave_medium_easy",
+   "path": "autospawn/monument/cave/cave_medium_easy.prefab",
+   "folder": "cave",
+   "label": "Cave Medium Easy",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "cave_medium_hard",
+   "path": "autospawn/monument/cave/cave_medium_hard.prefab",
+   "folder": "cave",
+   "label": "Cave Medium Hard",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "cave_medium_medium",
+   "path": "autospawn/monument/cave/cave_medium_medium.prefab",
+   "folder": "cave",
+   "label": "Cave Medium Medium",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "cave_small_easy",
+   "path": "autospawn/monument/cave/cave_small_easy.prefab",
+   "folder": "cave",
+   "label": "Cave Small Easy",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "cave_small_hard",
+   "path": "autospawn/monument/cave/cave_small_hard.prefab",
+   "folder": "cave",
+   "label": "Cave Small Hard",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "cave_small_medium",
+   "path": "autospawn/monument/cave/cave_small_medium.prefab",
+   "folder": "cave",
+   "label": "Cave Small Medium",
+   "group": "Caves",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Cave",
+   "biomes": "any"
+  },
+  {
+   "prefab": "ice_lake_1",
+   "path": "autospawn/monument/ice_lakes/ice_lake_1.prefab",
+   "folder": "ice_lakes",
+   "label": "Ice Lake 1",
+   "group": "Ice lakes",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Lake",
+   "biomes": [
+    "Arctic"
+   ]
+  },
+  {
+   "prefab": "ice_lake_2",
+   "path": "autospawn/monument/ice_lakes/ice_lake_2.prefab",
+   "folder": "ice_lakes",
+   "label": "Ice Lake 2",
+   "group": "Ice lakes",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Lake",
+   "biomes": [
+    "Arctic"
+   ]
+  },
+  {
+   "prefab": "ice_lake_3",
+   "path": "autospawn/monument/ice_lakes/ice_lake_3.prefab",
+   "folder": "ice_lakes",
+   "label": "Ice Lake 3",
+   "group": "Ice lakes",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Lake",
+   "biomes": [
+    "Arctic"
+   ]
+  },
+  {
+   "prefab": "ice_lake_4",
+   "path": "autospawn/monument/ice_lakes/ice_lake_4.prefab",
+   "folder": "ice_lakes",
+   "label": "Ice Lake 4",
+   "group": "Ice lakes",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Lake",
+   "biomes": [
+    "Arctic"
+   ]
+  },
+  {
+   "prefab": "jungle_ruins_a",
+   "path": "autospawn/monument/jungle_ruins/jungle_ruins_a.prefab",
+   "folder": "jungle_ruins",
+   "label": "Jungle Ruins A",
+   "group": "Ruins",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": [
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "jungle_ruins_b",
+   "path": "autospawn/monument/jungle_ruins/jungle_ruins_b.prefab",
+   "folder": "jungle_ruins",
+   "label": "Jungle Ruins B",
+   "group": "Ruins",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": [
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "jungle_ruins_c",
+   "path": "autospawn/monument/jungle_ruins/jungle_ruins_c.prefab",
+   "folder": "jungle_ruins",
+   "label": "Jungle Ruins C",
+   "group": "Ruins",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": [
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "jungle_ruins_d",
+   "path": "autospawn/monument/jungle_ruins/jungle_ruins_d.prefab",
+   "folder": "jungle_ruins",
+   "label": "Jungle Ruins D",
+   "group": "Ruins",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": [
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "jungle_ruins_e",
+   "path": "autospawn/monument/jungle_ruins/jungle_ruins_e.prefab",
+   "folder": "jungle_ruins",
+   "label": "Jungle Ruins E",
+   "group": "Ruins",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": [
+    "Jungle"
+   ]
+  },
+  {
+   "prefab": "underwater_lab_a",
+   "path": "autospawn/monument/underwater_lab/underwater_lab_a.prefab",
+   "folder": "underwater_lab",
+   "label": "Underwater Lab A",
+   "group": "Underwater labs",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": "any"
+  },
+  {
+   "prefab": "underwater_lab_b",
+   "path": "autospawn/monument/underwater_lab/underwater_lab_b.prefab",
+   "folder": "underwater_lab",
+   "label": "Underwater Lab B",
+   "group": "Underwater labs",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": "any"
+  },
+  {
+   "prefab": "underwater_lab_c",
+   "path": "autospawn/monument/underwater_lab/underwater_lab_c.prefab",
+   "folder": "underwater_lab",
+   "label": "Underwater Lab C",
+   "group": "Underwater labs",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": "any"
+  },
+  {
+   "prefab": "underwater_lab_d",
+   "path": "autospawn/monument/underwater_lab/underwater_lab_d.prefab",
+   "folder": "underwater_lab",
+   "label": "Underwater Lab D",
+   "group": "Underwater labs",
+   "game_min_world_size": 0,
+   "game_priority": "Default",
+   "tier": "-1",
+   "type": "Building",
+   "biomes": "any"
+  }
+ ],
+ "scenery": [
+  {
+   "key": "road car wrecks",
+   "label": "Car wrecks on roads",
+   "fragments": [
+    "autospawn/decor/v3_road_vehicles"
+   ],
+   "step": null,
+   "game_min_world_size": 0
+  },
+  {
+   "key": "road power poles",
+   "label": "Power poles along roads",
+   "fragments": [
+    "autospawn/decor/powerline-small/",
+    "autospawn/decor/powerline-pole-"
+   ],
+   "step": null,
+   "game_min_world_size": 0
+  },
+  {
+   "key": "electrical boxes",
+   "label": "Electrical boxes by roads",
+   "fragments": [
+    "autospawn/decor/roadside/electrical_box"
+   ],
+   "step": null,
+   "game_min_world_size": 0
+  },
+  {
+   "key": "road signs",
+   "label": "Road signs",
+   "fragments": [
+    "autospawn/decor/roadside/roadsign"
+   ],
+   "step": null,
+   "game_min_world_size": 0
+  },
+  {
+   "key": "icebergs",
+   "label": "Icebergs",
+   "fragments": [
+    "autospawn/decor/iceberg/"
+   ],
+   "step": null,
+   "game_min_world_size": 0
+  },
+  {
+   "key": "mountains",
+   "label": "Mountains",
+   "fragments": [
+    "autospawn/mountain/mountain_"
+   ],
+   "step": "mountain",
+   "game_min_world_size": 5000
+  },
+  {
+   "key": "canyons",
+   "label": "Canyons",
+   "fragments": [
+    "autospawn/unique_environment/canyon/"
+   ],
+   "step": "unique_environment/canyon",
+   "game_min_world_size": 4500
+  },
+  {
+   "key": "oases",
+   "label": "Oases",
+   "fragments": [
+    "autospawn/unique_environment/oasis/"
+   ],
+   "step": "unique_environment/oasis",
+   "game_min_world_size": 4000
+  },
+  {
+   "key": "lakes",
+   "label": "Lakes",
+   "fragments": [
+    "autospawn/unique_environment/lake/"
+   ],
+   "step": "unique_environment/lake",
+   "game_min_world_size": 4000
+  },
+  {
+   "key": "jungle swamps",
+   "label": "Jungle swamps",
+   "fragments": [
+    "autospawn/unique_environment/jungle/"
+   ],
+   "step": "unique_environment/jungle",
+   "game_min_world_size": 0
+  }
+ ],
+ "steps": [
+  {
+   "folder": "mountain",
+   "label": "Mountains",
+   "game_count": 1,
+   "game_min_world_size": 5000,
+   "game_distance_same": 2000,
+   "game_distance_other": 0
+  },
+  {
+   "folder": "unique_environment/canyon",
+   "label": "Canyons",
+   "game_count": 2,
+   "game_min_world_size": 4500,
+   "game_distance_same": 300,
+   "game_distance_other": 200
+  },
+  {
+   "folder": "unique_environment/jungle",
+   "label": "Jungle Swamps",
+   "game_count": 3,
+   "game_min_world_size": 0,
+   "game_distance_same": 300,
+   "game_distance_other": 200
+  },
+  {
+   "folder": "unique_environment/lake",
+   "label": "Lakes",
+   "game_count": 2,
+   "game_min_world_size": 4000,
+   "game_distance_same": 300,
+   "game_distance_other": 200
+  },
+  {
+   "folder": "unique_environment/oasis",
+   "label": "Oasis",
+   "game_count": 2,
+   "game_min_world_size": 4000,
+   "game_distance_same": 300,
+   "game_distance_other": 200
+  },
+  {
+   "folder": "monument/harbor",
+   "label": "Harbors",
+   "game_count": 0,
+   "game_min_world_size": 0,
+   "game_distance_same": 500,
+   "game_distance_other": 50
+  },
+  {
+   "folder": "monument/fishing_village",
+   "label": "Fishing Villages",
+   "game_count": 0,
+   "game_min_world_size": 0,
+   "game_distance_same": 500,
+   "game_distance_other": 300
+  },
+  {
+   "folder": "monument/military_bases",
+   "label": "Desert Military",
+   "game_count": 1,
+   "game_min_world_size": 0,
+   "game_distance_same": 250,
+   "game_distance_other": 50
+  },
+  {
+   "folder": "monument/arctic_bases",
+   "label": "Arctic Bases",
+   "game_count": 1,
+   "game_min_world_size": 0,
+   "game_distance_same": 250,
+   "game_distance_other": 50
+  },
+  {
+   "folder": "monument/xlarge,monument/large,monument/medium,monument/small",
+   "label": "Main Monuments",
+   "game_count": 0,
+   "game_min_world_size": 0,
+   "game_distance_same": 500,
+   "game_distance_other": 100
+  },
+  {
+   "folder": "tunnel-entrance",
+   "label": "Tunnel Entrances",
+   "game_count": 0,
+   "game_min_world_size": 0,
+   "game_distance_same": 500,
+   "game_distance_other": 50
+  },
+  {
+   "folder": "monument/tiny",
+   "label": "Tiny Monuments",
+   "game_count": 0,
+   "game_min_world_size": 0,
+   "game_distance_same": 500,
+   "game_distance_other": 50
+  },
+  {
+   "folder": "monument/jungle_ruins",
+   "label": "Jungle Ruins",
+   "game_count": 0,
+   "game_min_world_size": 0,
+   "game_distance_same": 500,
+   "game_distance_other": 50
+  },
+  {
+   "folder": "monument/swamp",
+   "label": "Swamps",
+   "game_count": 3,
+   "game_min_world_size": 0,
+   "game_distance_same": 500,
+   "game_distance_other": 50
+  },
+  {
+   "folder": "monument/ice_lakes",
+   "label": "Ice Lakes",
+   "game_count": 3,
+   "game_min_world_size": 0,
+   "game_distance_same": 500,
+   "game_distance_other": 50
+  },
+  {
+   "folder": "monument/cave",
+   "label": "Caves",
+   "game_count": 10,
+   "game_min_world_size": 0,
+   "game_distance_same": 750,
+   "game_distance_other": 0
+  },
+  {
+   "folder": "monument/underwater_lab",
+   "label": "Underwater Labs",
+   "game_count": 1,
+   "game_min_world_size": 0,
+   "game_distance_same": 1500,
+   "game_distance_other": 250
+  },
+  {
+   "folder": "monument/lighthouse",
+   "label": "Lighthouses",
+   "game_count": 0,
+   "game_min_world_size": 0,
+   "game_distance_same": 1000,
+   "game_distance_other": 100
+  }
+ ],
+ "rail_ring_game_size": 4250,
+ "road_ring_game_size": 4000
+}

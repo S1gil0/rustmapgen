@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RustMapGen</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><svg class="logo" viewBox="0 0 24 24" role="img" aria-label="RustMapGen"><title>RustMapGen</title><path class="n-lo" d="M12 1.5L8.8 8.8 12 12z"/><path class="n-hi" d="M12 1.5L15.2 8.8 12 12z"/><path class="hi" d="M22.5 12L15.2 8.8 12 12zM12 22.5L8.8 15.2 12 12zM1.5 12L8.8 8.8 12 12z"/><path class="lo" d="M22.5 12L15.2 15.2 12 12zM12 22.5L15.2 15.2 12 12zM1.5 12L8.8 15.2 12 12z"/></svg></div>
+    <nav class="tabs" aria-label="Views">
+      <button class="tab new" id="tab-gen" data-testid="tab-generator">New Map</button>
+      <button class="tab" id="tab-maps" data-testid="tab-maps">Maps</button>
+    </nav>
+    <div class="top-stat" id="top-counts"></div>
+    <div class="top-status" id="top-status" data-testid="generator-status"></div>
+    <button class="btn top-updates" id="updates-btn" type="button" aria-expanded="false" aria-controls="updates" data-testid="updates">Updates</button>
+  </header>
+  <section class="panel updates" id="updates" data-testid="updates-panel" hidden></section>
+
+  <aside class="side" id="side" data-testid="map-list">
+    <div id="live" class="live-list" data-testid="live"></div>
+    <div id="list"></div>
+    <nav id="e-nav" class="e-nav" aria-label="Settings sections" hidden></nav>
+  </aside>
+
+  <main class="main" id="main" hidden>
+    <button class="live-strip" id="live-strip" type="button" data-testid="live-strip" hidden></button>
+    <div class="picker">
+      <label for="pick">Map</label>
+      <select id="pick" data-testid="map-select"></select>
+    </div>
+    <section class="panel head" id="head"></section>
+    <div class="overview" id="overview">
+      <section class="views" id="views" data-testid="views"></section>
+      <aside class="panel glance" id="glance" data-testid="glance"></aside>
+    </div>
+    <nav class="d-tabs" id="d-tabs" role="tablist" aria-label="Details"></nav>
+    <section class="panels" id="panels"></section>
+  </main>
+
+  <main class="main editor" id="editor" data-testid="editor">
+    <section class="panel install" id="install" hidden></section>
+    <section class="panel e-bar" id="e-bar"></section>
+    <nav class="e-nav-top" id="e-nav-top" aria-label="Settings sections"></nav>
+    <div class="e-body" id="e-body">
+      <div class="e-sections" id="e-sections"></div>
+      <aside class="panel e-summary" id="e-summary" data-testid="summary"></aside>
+    </div>
+  </main>
+</div>
+<script src="editor.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+{
+  "name": "small",
+  "title": "Small, no safe zones",
+  "size": 2000,
+  "source": "A small fighting map. Monuments: the safe zones (the Outpost, the Bandit Camp, the fishing villages) set to \"Never\", with the Ranch, the Large Barn and the big ones a small map has no room for (the Airfield, the Launch Site, the Giant Excavator, the Power Plant, the Train Yard and more); the Missile Silo, the oil rigs and The Dome to \"Prefer\". Nothing in the middle (Outpost section), building on roads allowed and a rail ring asked for (Basics). Not every small map gets its rail ring: make a few and keep one that passes its checks. The land (Basics): Island \"Set the size\" at 40 % of the square, Hills \"Lower\", Shallows \"Wide\", like the maps busy community servers run; the game alone makes less land and taller hills, and some wanted monuments then find no room.",
+  "world": {
+    "MainRoads": true,
+    "SideRoads": true,
+    "Trails": true,
+    "Rivers": true,
+    "Powerlines": true,
+    "AboveGroundRails": true,
+    "BelowGroundRails": true,
+    "UnderwaterLabs": true,
+    "PercentageTier0": 0.3,
+    "PercentageTier1": 0.3,
+    "PercentageTier2": 0.4,
+    "PercentageBiomeArid": 0.4,
+    "PercentageBiomeTemperate": 0.15,
+    "PercentageBiomeTundra": 0.15,
+    "PercentageBiomeArctic": 0.3,
+    "PercentageBiomeJungle": 0.5
+  },
+  "monuments": {
+    "oilrig_1": "want",
+    "oilrig_2": "want",
+    "sphere_tank": "want",
+    "nuclear_missile_silo": "want",
+    "compound": "block",
+    "bandit_town": "block",
+    "fishing_village_a": "block",
+    "fishing_village_b": "block",
+    "fishing_village_c": "block",
+    "stables_a": "block",
+    "stables_b": "block",
+    "airfield_1": "block",
+    "junkyard_1": "block",
+    "launch_site_1": "block",
+    "powerplant_1": "block",
+    "trainyard_1": "block",
+    "satellite_dish": "block",
+    "apartments_complex_1": "block",
+    "excavator_1": "block",
+    "radtown_small_3": "block",
+    "swamp_a": "block",
+    "swamp_b": "block",
+    "swamp_c": "block",
+    "water_well_a": "block",
+    "water_well_b": "block",
+    "water_well_c": "block",
+    "water_well_d": "block",
+    "water_well_e": "block",
+    "cave_large_hard": "block",
+    "cave_large_medium": "block",
+    "cave_large_sewers_hard": "block",
+    "cave_medium_easy": "block",
+    "cave_medium_hard": "block",
+    "cave_medium_medium": "block",
+    "cave_small_easy": "block",
+    "cave_small_medium": "block",
+    "mining_quarry_b": "block",
+    "ice_lake_1": "block",
+    "ice_lake_2": "block",
+    "ice_lake_3": "block",
+    "ice_lake_4": "block"
+  },
+  "scenery": {
+    "road car wrecks": "block",
+    "road power poles": "block",
+    "icebergs": "block",
+    "mountains": "block"
+  },
+  "block_extra": [],
+  "rail_ring": "always",
+  "road_ring": "game",
+  "steps": {},
+  "relax_distances": 1.0,
+  "centre": {
+    "monument": "",
+    "start_m": 4.0,
+    "grow_m": 0.35,
+    "within_m": 600,
+    "any_tier": false
+  },
+  "underwater_labs": null,
+  "terrain": {
+    "land_share": 0.4,
+    "coast_fade_m": 25.0,
+    "relief_radius_m": 70.0,
+    "relief_keep": 0.85,
+    "profile": {
+      "p10": 2.3,
+      "p50": 9.0,
+      "p90": 20.1,
+      "p99": 40.6,
+      "max": 60.5
+    },
+    "shallows": [
+      [
+        1.0,
+        0.048
+      ],
+      [
+        3.0,
+        0.068
+      ],
+      [
+        6.0,
+        0.08
+      ],
+      [
+        12.0,
+        0.097
+      ],
+      [
+        20.0,
+        0.12
+      ],
+      [
+        30.0,
+        0.148
+      ],
+      [
+        40.0,
+        0.191
+      ]
+    ]
+  },
+  "templates": [],
+  "template_skip": [],
+  "build_on_roads": true
+}

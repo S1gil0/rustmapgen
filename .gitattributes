@@ -1,0 +1,8 @@
+* text=auto
+*.sh text eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.dll binary
+*.map binary
+# Never in a release: the release script names what must not be published.
+/scripts/ export-ignore

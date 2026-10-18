@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- dotnet build -c Release -o build   (or: python -m rustmapgen build-mod)
+       It compiles against the game's own DLLs, from the install next to this folder unless
+       -p:RustManaged=<RustDedicated_Data/Managed of another install> says otherwise. -->
+  <PropertyGroup>
+    <AssemblyName>RustMapGen</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>net481</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <!-- Nothing of the machine it was built on ends up in the DLL. -->
+    <DebugType>none</DebugType>
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildProjectDirectory)=/rustmapgen/mod</PathMap>
+    <RustManaged Condition="'$(RustManaged)' == ''">$(MSBuildThisFileDirectory)../game/RustDedicated_Data/Managed</RustManaged>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>$(RustManaged)/Assembly-CSharp.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Rust.Harmony"><HintPath>$(RustManaged)/Rust.Harmony.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Rust.World"><HintPath>$(RustManaged)/Rust.World.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Rust.Data"><HintPath>$(RustManaged)/Rust.Data.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Rust.Global"><HintPath>$(RustManaged)/Rust.Global.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Rust.Localization"><HintPath>$(RustManaged)/Rust.Localization.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(RustManaged)/0Harmony.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Facepunch.System"><HintPath>$(RustManaged)/Facepunch.System.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Facepunch.UnityEngine"><HintPath>$(RustManaged)/Facepunch.UnityEngine.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(RustManaged)/Newtonsoft.Json.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Unity.Collections"><HintPath>$(RustManaged)/Unity.Collections.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(RustManaged)/UnityEngine.CoreModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.AnimationModule"><HintPath>$(RustManaged)/UnityEngine.AnimationModule.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+</Project>

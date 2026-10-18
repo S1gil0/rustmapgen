@@ -1,0 +1,43 @@
+{
+  "name": "game-default",
+  "title": "Game default",
+  "size": 4250,
+  "source": "Everything as the game decides by itself, nothing changed: the map to compare the others with. From 4250 the game places every monument and both rings by itself (the road ring from 4000, the rail ring from 4250); canyons come from 4500 and the large mountain from 5000.",
+  "world": {
+    "MainRoads": true,
+    "SideRoads": true,
+    "Trails": true,
+    "Rivers": true,
+    "Powerlines": true,
+    "AboveGroundRails": true,
+    "BelowGroundRails": true,
+    "UnderwaterLabs": true,
+    "PercentageTier0": 0.3,
+    "PercentageTier1": 0.3,
+    "PercentageTier2": 0.4,
+    "PercentageBiomeArid": 0.4,
+    "PercentageBiomeTemperate": 0.15,
+    "PercentageBiomeTundra": 0.15,
+    "PercentageBiomeArctic": 0.3,
+    "PercentageBiomeJungle": 0.5
+  },
+  "monuments": {},
+  "scenery": {},
+  "block_extra": [],
+  "rail_ring": "game",
+  "road_ring": "game",
+  "steps": {},
+  "relax_distances": 1.0,
+  "centre": {
+    "monument": "",
+    "start_m": 4.0,
+    "grow_m": 0.35,
+    "within_m": 600,
+    "any_tier": false
+  },
+  "underwater_labs": null,
+  "terrain": {},
+  "templates": [],
+  "template_skip": [],
+  "build_on_roads": false
+}

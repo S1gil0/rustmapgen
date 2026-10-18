@@ -1,0 +1,135 @@
+{
+  "name": "large",
+  "title": "Large",
+  "size": 4000,
+  "source": "The medium map with room to spare: Radtown and the jungle ruins come back, two or three underwater labs (World features), and the canyons the game adds from 4500 blocked (Scenery). Every big monument set to \"Prefer\", caves, swamps, wells, two of the ice lakes, the Ranch, the Large Barn and the Bandit Camp to \"Never\", the Outpost searched from the middle. The land (Basics): Island \"Set the size\" at 62 % of the square, Hills \"Lower\", Shallows \"Wide\", like the maps busy community servers run; the game alone makes less land and taller hills, and some wanted monuments then find no room.",
+  "world": {
+    "MainRoads": true,
+    "SideRoads": true,
+    "Trails": true,
+    "Rivers": true,
+    "Powerlines": true,
+    "AboveGroundRails": true,
+    "BelowGroundRails": true,
+    "UnderwaterLabs": true,
+    "PercentageTier0": 0.3,
+    "PercentageTier1": 0.3,
+    "PercentageTier2": 0.4,
+    "PercentageBiomeArid": 0.4,
+    "PercentageBiomeTemperate": 0.15,
+    "PercentageBiomeTundra": 0.15,
+    "PercentageBiomeArctic": 0.3,
+    "PercentageBiomeJungle": 0.5
+  },
+  "monuments": {
+    "compound": "want",
+    "fishing_village_a": "want",
+    "fishing_village_b": "want",
+    "fishing_village_c": "want",
+    "oilrig_1": "want",
+    "oilrig_2": "want",
+    "junkyard_1": "want",
+    "launch_site_1": "want",
+    "military_tunnel_1": "want",
+    "powerplant_1": "want",
+    "trainyard_1": "want",
+    "water_treatment_plant_1": "want",
+    "sphere_tank": "want",
+    "satellite_dish": "want",
+    "nuclear_missile_silo": "want",
+    "jungle_ziggurat_a": "want",
+    "excavator_1": "want",
+    "gas_station_1": "want",
+    "supermarket_1": "want",
+    "warehouse": "want",
+    "radtown_small_3": "want",
+    "bandit_town": "block",
+    "stables_a": "block",
+    "stables_b": "block",
+    "apartments_complex_1": "block",
+    "swamp_a": "block",
+    "swamp_b": "block",
+    "swamp_c": "block",
+    "water_well_a": "block",
+    "water_well_b": "block",
+    "water_well_c": "block",
+    "water_well_e": "block",
+    "cave_large_hard": "block",
+    "cave_large_medium": "block",
+    "cave_large_sewers_hard": "block",
+    "cave_medium_easy": "block",
+    "cave_medium_hard": "block",
+    "cave_medium_medium": "block",
+    "ice_lake_3": "block",
+    "ice_lake_4": "block"
+  },
+  "scenery": {
+    "road car wrecks": "block",
+    "road power poles": "block",
+    "icebergs": "block",
+    "mountains": "block",
+    "canyons": "block"
+  },
+  "block_extra": [],
+  "rail_ring": "always",
+  "road_ring": "game",
+  "steps": {},
+  "relax_distances": 1.0,
+  "centre": {
+    "monument": "compound",
+    "start_m": 4.0,
+    "grow_m": 0.35,
+    "within_m": 600,
+    "any_tier": false
+  },
+  "underwater_labs": {
+    "min": 2,
+    "max": 3
+  },
+  "terrain": {
+    "land_share": 0.62,
+    "coast_fade_m": 25.0,
+    "relief_radius_m": 70.0,
+    "relief_keep": 0.85,
+    "profile": {
+      "p10": 5.8,
+      "p50": 18.2,
+      "p90": 31.2,
+      "p99": 54.0,
+      "max": 68.0
+    },
+    "shallows": [
+      [
+        1.0,
+        0.048
+      ],
+      [
+        3.0,
+        0.068
+      ],
+      [
+        6.0,
+        0.08
+      ],
+      [
+        12.0,
+        0.097
+      ],
+      [
+        20.0,
+        0.12
+      ],
+      [
+        30.0,
+        0.148
+      ],
+      [
+        40.0,
+        0.191
+      ]
+    ]
+  },
+  "templates": [],
+  "template_skip": [],
+  "build_on_roads": false
+}
