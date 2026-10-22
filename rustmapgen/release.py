@@ -10,6 +10,7 @@ its place first, and a record in the data folder (PENDING) says an update is und
 file, the version, is in. While the record is there, the same release is offered again, however far the
 update came, and done again from the start (files already right are left as they are).
 """
+import contextlib
 import io
 import json
 import os
@@ -29,7 +30,7 @@ REPOSITORY = 'S1gil0/rustmapgen'
 API = os.environ.get('RUSTMAPGEN_RELEASES', f'https://api.github.com/repos/{REPOSITORY}')
 PAGE = f'https://github.com/{REPOSITORY}'
 TAG = re.compile(r'^v(\d+)\.(\d+)\.(\d+)$')
-KEEP = ('data', 'game', 'game-staging', 'steamcmd', '.venv', '.git', 'mod/build', 'mod/obj')
+KEEP = ('data', 'game', 'game-next', 'game-staging', 'steamcmd', '.venv', '.git', 'mod/build', 'mod/obj')
 # Windows reads a running batch file as it goes: a launcher that changes is never followed by a restart from it.
 LAUNCHERS = ('rustmapgen.cmd', 'rustmapgen.sh')
 VERSION_FILE = 'rustmapgen/__init__.py'       # put in last: it says which release this copy is
@@ -108,9 +109,8 @@ def check():
         out['unfinished'] = unfinished['version']
     if releases:
         newest, tag = releases[-1]
-        # What is new is the release commit's message: its page on GitHub.
-        sha = (tag.get('commit') or {}).get('sha')
-        out.update(latest=tag['name'][1:], zip=tag.get('zipball_url'), notes=f'{PAGE}/commit/{sha}' if sha else f'{PAGE}/tree/{tag["name"]}',
+        # What is new: the changelog as that release has it, on GitHub.
+        out.update(latest=tag['name'][1:], zip=tag.get('zipball_url'), notes=f'{PAGE}/blob/{tag["name"]}/CHANGELOG.md',
                    newer=newest > version('v' + __version__) or bool(unfinished and newest >= version('v' + unfinished['version'])))
     return out
 
@@ -197,8 +197,50 @@ def _put(plan):
     return written
 
 
+@contextlib.contextmanager
+def _install_lock():
+    """One update of this copy at a time, whichever panel or command asks, and whatever data or game folder
+    it uses: an OS lock on a file beside the code, which goes when the process goes."""
+    handle = open(os.path.join(paths.ROOT, 'rustmapgen-update.lock'), 'a+')
+    try:
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise RuntimeError('another update of RustMapGen is under way in this folder') from None
+        yield
+    finally:
+        handle.close()
+
+
+def finish(say=print):
+    """`rustmapgen finish-update`: the update that did not finish, done again from the start. It needs nothing
+    of RustMapGen but this module, so it works when a half-updated copy cannot start its panel."""
+    unfinished = pending()
+    if not unfinished:
+        say('no update of RustMapGen is unfinished')
+        return None
+    found = check()
+    if not found.get('newer'):
+        raise RuntimeError(f'the update to {unfinished["version"]} cannot be finished: the release is not offered any more')
+    say(f'finishing the update to {found["latest"]}…', flush=True)
+    done = apply(found)
+    say(f'RustMapGen {done["version"]} is in place: start the panel again', flush=True)
+    return done
+
+
 def apply(found):
     """Put the release `check()` found in place. {'version', 'restart': 'auto' or 'by hand', 'files'}."""
+    with _install_lock():
+        return _apply(found)
+
+
+def _apply(found):
     if not found.get('newer'):
         raise RuntimeError('this copy is up to date')
     if found['how'] == 'development':

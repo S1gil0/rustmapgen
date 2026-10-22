@@ -18,7 +18,7 @@ import time
 import urllib.request
 import zipfile
 
-from . import paths, runner
+from . import paths, runner, staging
 
 WINDOWS = os.name == 'nt'
 STEAMCMD_URL = ('https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip' if WINDOWS
@@ -78,17 +78,29 @@ def _progress(say):
     """What steamcmd is doing, from its lines: a bar that moves on a terminal, elsewhere (the output of
     ssh, a log) a line for each step and every 10 %."""
     live = say is print and sys.stdout.isatty()
-    shown = {'step': None, 'tenth': -1, 'width': 0}
+    shown = {'step': None, 'tenth': -1, 'width': 0, 'percent': 0, 'whole': None}
+
+    def bar(step, percent, done, whole):
+        sizes = f'{done / 1e9:.1f} of {whole / 1e9:.1f} GB' if whole else ''
+        filled = int(min(percent, 100) / 5)
+        return f'  {step:<34} [{"#" * filled}{"-" * (20 - filled)}] {int(percent):3d} %  {sizes}'
+
+    def complete():
+        # The step shown is over: steamcmd's last word on it is often 99 %, which would stay on the screen.
+        if live and shown['step'] and shown['percent'] < 100:
+            sys.stdout.write('\r' + bar(shown['step'], 100, shown['whole'], shown['whole']).ljust(shown['width']))
+            sys.stdout.flush()
 
     def show(step, percent, done=None, whole=None):
         sizes = f'{done / 1e9:.1f} of {whole / 1e9:.1f} GB' if whole else ''
         new, tenth = step != shown['step'], int(min(percent, 100) // 10)
         if live:
-            filled = int(min(percent, 100) / 5)
-            text = f'  {step:<34} [{"#" * filled}{"-" * (20 - filled)}] {int(percent):3d} %  {sizes}'
+            if new:
+                complete()          # steamcmd went on: the step before is done
+            text = bar(step, percent, done, whole)
             sys.stdout.write(('\n' if new and shown['step'] else '') + '\r' + text.ljust(0 if new else shown['width']))
             sys.stdout.flush()
-            shown['width'] = len(text)
+            shown.update(width=len(text), percent=percent, whole=whole)
         elif new or tenth > shown['tenth']:
             say(f'  {step}: {int(percent)} %' + (f' ({sizes})' if sizes else ''), flush=True)
         shown['step'], shown['tenth'] = step, tenth if new else max(tenth, shown['tenth'])
@@ -102,11 +114,13 @@ def _progress(say):
         elif SELF_UPDATE.match(line):
             show('steamcmd is updating itself', float(SELF_UPDATE.match(line).group(1)))
 
-    def end():
+    def end(done=False):
         if live and shown['step']:
+            if done:
+                complete()
             sys.stdout.write('\n')
             sys.stdout.flush()
-        shown.update(step=None, tenth=-1, width=0)
+        shown.update(step=None, tenth=-1, width=0, percent=0, whole=None)
     return seen, end
 
 
@@ -158,7 +172,7 @@ def _steamcmd(command, say=print, timeout=None):
                     seen(line)
                 process.wait()
         finally:
-            end()                   # a terminal gone meanwhile may fail here: steamcmd is stopped all the same
+            end(process.poll() == 0)    # a terminal gone meanwhile may fail here: steamcmd is stopped all the same
     finally:
         if timeout:
             clock.cancel()
@@ -172,13 +186,16 @@ def _steamcmd(command, say=print, timeout=None):
     return process.returncode, None if console else ''.join(lines), ''
 
 
-# In steamcmd's app_info_print: "public" { "buildid" "25902425" ... } under "branches".
-BRANCH_BUILD = re.compile(r'"(public|staging)"\s*\{\s*"buildid"\s*"(\d+)"')
+# In steamcmd's app_info_print, under "branches": "public" { "buildid" "25902425" "timeupdated" "1791884653" ... }.
+# timeupdated is when the branch was last set to a build: for the public branch, when a build went public.
+BRANCH = re.compile(r'"(public|release|staging)"\s*\{([^{}]*)\}')
+FIELD = re.compile(r'"(buildid|timeupdated)"\s*"(\d+)"')
 
 
 def steam_builds(timeout=120):
-    """The builds Steam has now on the public and staging branches, asked with steamcmd (about 10 s):
-    {'public': '...', 'staging': '...'}. Nothing in the game folder changes. A steamcmd that fails is not
+    """The builds Steam has now on the public, release and staging branches, asked with steamcmd (about 10 s):
+    {'public': '...', 'release': '...', 'staging': '...', 'public_updated': unix time, ...}, the times when each
+    branch was last set to a build. Nothing in the game folder changes. A steamcmd that fails is not
     believed, whatever it printed, and one that does not answer within `timeout` seconds is stopped."""
     quiet = lambda *a, **k: None                   # noqa: E731 (a pipe: on Windows too, the lines are read at the end)
     program = ensure_steamcmd(quiet)
@@ -186,9 +203,16 @@ def steam_builds(timeout=120):
                                 '+app_info_print', str(paths.GAME_APP), '+quit'], say=quiet, timeout=timeout)
     if code:
         raise RuntimeError(f'steamcmd ended with {code} while asking Steam')
-    found = dict(BRANCH_BUILD.findall(re.sub(r'\x1b\[[0-9;]*m', '', out or '')))
+    found = {}
+    for branch, body in BRANCH.findall(re.sub(r'\x1b\[[0-9;]*m', '', out or '')):
+        fields = dict(FIELD.findall(body))
+        if 'buildid' in fields and branch not in found:
+            found[branch] = fields['buildid']
+            if 'timeupdated' in fields:
+                found[f'{branch}_updated'] = int(fields['timeupdated'])
     if 'public' not in found:
         raise RuntimeError('Steam did not say which build it has')
+    staging.remember(found)             # on the day of the forced wipe, what shows the update out
     return found
 
 
@@ -266,6 +290,91 @@ def update_game(branch=None, say=print):
     return build
 
 
+def bring_to_newest(branch, say=print):
+    """The game at Steam's newest build of `branch`: before each map or load test on the next update's game, and before
+    a map of the next update is load tested on the public game. Steam is asked first (seconds; an answer of the last
+    staging.FRESH_MINUTES is used again, as the job before often just asked): a game already at that build is left as
+    it is, and only another build is fetched (steamcmd checks every file then). An answer of Steam without that branch
+    stops it: nothing is made on a branch that is gone. The caller holds the lock."""
+    newest = (staging.recent() or {}).get(branch) or None
+    if not newest:
+        try:
+            answer = steam_builds()
+        except (RuntimeError, OSError):
+            answer = None               # Steam not asked: steamcmd below says why, or finds the newest itself
+        if answer is not None and not answer.get(branch):
+            raise RuntimeError(f'Steam has no {branch} branch of the game now: nothing is made on it')
+        newest = (answer or {}).get(branch)
+    if (runner.game_branch() == branch and runner.game_state() == '4' and os.path.isfile(runner.executable())
+            and not os.path.exists(paths.game(runner.UPDATING))):
+        if newest and newest == runner.game_build():
+            which = "the next update's game" if staging.active() else 'the game'
+            say(f'{which} is at Steam\'s newest {branch} build ({newest})', flush=True)
+            return newest
+    return update_game(branch, say)
+
+
+def behind_forced_wipe(now=None):
+    """Whether the public game here was last installed or updated before the day of the latest forced wipe (UTC): it may be
+    last month's game then, and that update changes how maps are made. Read from steamcmd's record, without asking Steam.
+    A game updated on the wipe day itself, before the update came out, is taken as current (a known limit)."""
+    updated = runner.game_updated()
+    return updated is not None and not staging.active() and updated < staging.wipe_start(now).timestamp()
+
+
+def catch_up(say=print, now=None):
+    """Before maps on the public game: a game last updated before the latest forced wipe is brought to Steam's public build
+    once that wipe's update is out (Steam's public branch set on or after that day, UTC). Until then, or when Steam cannot be
+    asked, the game is left as it is and the maps are made on it, and so is a game updated since that day: a mid-month update
+    is never fetched this way. Steam is asked at most every FRESH_MINUTES. The caller holds the lock. Returns the build."""
+    if not behind_forced_wipe(now):
+        return runner.game_build()
+    wipe, build = staging.day(staging.last_wipe(now)), runner.game_build()
+    steam = staging.recent(now)
+    if not steam:
+        try:
+            steam = steam_builds()
+        except (RuntimeError, OSError) as error:
+            say(f'the game was last updated before the forced wipe of {wipe}, and Steam could not be asked whether its update '
+                f'is out ({error}): the maps are made on build {build}', flush=True)
+            return build
+    # Out: Steam's public branch set on that day or later (but not later than now), or the release as the next update
+    # sees it (staging.released: the public branch holding the declared branch's build that day).
+    out = steam.get('public_updated')
+    moment = now.timestamp() if now else time.time()
+    if not (isinstance(out, int) and staging.wipe_start(now).timestamp() <= out <= moment) and not staging.released(now):
+        say(f'the update of the forced wipe of {wipe} is not out yet: the maps are made on build {build}', flush=True)
+        return build
+    if str(steam.get('public')) == build:
+        return build
+    say(f'the forced wipe of {wipe} brought build {steam["public"]}: the game is updated to it before the maps', flush=True)
+    return update_game('public', say)
+
+
+def remove_staging(say=print):
+    """Delete the next update's game (about 6 GB) once no run holds it. Only a folder RustMapGen made is deleted. The
+    caller works on that game (staging.use())."""
+    folder = paths.game()
+    if not staging.active() or staging.same_place(folder, staging.public()):
+        # Checked again where it matters: what is deleted is the next update's folder, and never the public game.
+        raise RuntimeError(f'{folder} is not only the next update\'s game (it is, holds or sits in the public game\'s '
+                           'folder): it is left as it is')
+    if not os.path.isfile(os.path.join(folder, runner.MARKER)):
+        raise RuntimeError(f'{folder} is not a game RustMapGen installed: it is left as it is')
+    with runner.lock():
+        for name in os.listdir(folder):
+            if name == runner.LOCK_FILE:
+                continue
+            target = os.path.join(folder, name)
+            if os.path.isdir(target) and not os.path.islink(target):
+                shutil.rmtree(target)
+            else:
+                os.unlink(target)
+    os.unlink(os.path.join(folder, runner.LOCK_FILE))
+    os.rmdir(folder)
+    say(f'the next update\'s game is removed ({folder})', flush=True)
+
+
 def build_mod(say=print):
     """Compile the mod against the installed game (needs the .NET SDK 8 or newer). Under the lock.
 
@@ -276,6 +385,12 @@ def build_mod(say=print):
     if not dotnet:
         raise RuntimeError('the .NET SDK is not installed: the mod that came with the code stays in use. To build the mod '
                            'against this game, install the .NET SDK 8 or newer (https://dotnet.microsoft.com/download) and run this again')
+    newest = sdk_version(dotnet)
+    if not newest or newest < 8:
+        # An older SDK stops on the project's C# 12 with a compiler error that says nothing to a person.
+        have = f'the .NET SDK {newest}' if newest else 'no .NET SDK (only the runtime)'
+        raise RuntimeError(f'this computer has {have}; the mod is built with the .NET SDK 8 or newer: the mod that came with '
+                           'the code stays in use (https://dotnet.microsoft.com/download to build it here)')
     managed = paths.game('RustDedicated_Data', 'Managed')
     if not os.path.isfile(os.path.join(managed, 'Assembly-CSharp.dll')):
         raise RuntimeError(f'no game at {paths.game()} to build against: install it first')
@@ -305,19 +420,29 @@ def build_mod(say=print):
     return target
 
 
+def sdk_version(dotnet):
+    """The newest .NET SDK the dotnet command has, as its major version (8 for 8.0.100); None without one."""
+    try:
+        found = subprocess.run([dotnet, '--list-sdks'], capture_output=True, text=True, errors='replace', timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    majors = [int(major) for major in re.findall(r'^\s*(\d+)\.\d+', found or '', re.M)]
+    return max(majors) if majors else None
+
+
 def install(branch=None, say=print):
-    """Everything a first start needs: the data folders, steamcmd, the game, the mod."""
+    """Everything a first start needs: the data folders, steamcmd, the game, the mod. The mod is built here only when the one
+    that came with the code is for another build of the game (and a .NET SDK is there to build it)."""
     paths.ensure_data()
     with runner.lock():                 # never under a game that is making a map
         update_game(branch, say)
-        if shutil.which('dotnet'):
+        prebuilt = runner.read_json(os.path.join(paths.ROOT, 'mod', 'prebuilt', 'build.json')) or {}
+        if prebuilt.get('game_build') != runner.game_build() and shutil.which('dotnet'):
             try:
                 build_mod(say)
             except RuntimeError as error:
                 say(f'  {error}', flush=True)
-        say(f'  the mod used: {runner.describe_mod()}', flush=True)
-        target = runner.install_mod()
-    say(f'mod in place: {target}', flush=True)
+        runner.install_mod()            # which one, and where everything is, the install's last lines say
     return runner.describe_install()
 
 

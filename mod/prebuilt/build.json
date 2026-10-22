@@ -1,5 +1,6 @@
 {
  "game_build": "25902425",
+ "source_sha256": "99edb15f1a1d7797a96f57d01458f3093f65ac00c815e6701f02f3964b2c0e31",
  "sha256": "1749ea1963bab25b6b3bc7b2f5164270c5c62a237a144b15e594f4d3564b2dc7",
  "built_utc": "2026-10-17T08:14:26Z",
  "note": "Built from mod/RustMapGen.cs against that build of the game. A later build usually takes it; when the game says it failed to patch, run \"python -m rustmapgen build-mod\".",

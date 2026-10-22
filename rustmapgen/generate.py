@@ -19,7 +19,8 @@ import shutil
 import time
 import uuid
 
-from . import library, paths, recipe as recipes, runner
+from . import library, paths, recipe as recipes, runner, staging
+from .mapfile import TEMPLATE_RECORDS, TEMPLATE_WORLD, MapFile
 
 PROGRESS = r'^(Generating|Loading|\[RustMapGen\])|Process|Monument|Rail|Road'
 LOAD_PROGRESS = r'^(Loading|Spawning|\[RustMapGen\])|World|Monument|Navmesh|Initial'
@@ -60,8 +61,11 @@ def generate(recipe_path, seed=None, size=None, note='', say=print):
     seed = seed or random.randint(100000000, 999999999)
     if not 1000 <= size <= 6000 or not 1 <= seed <= 2147483647:
         raise ValueError('size must be 1000 to 6000 and seed 1 to 2147483647')
-    library.template_paths(recipe)          # a missing template fails before anything is made
+    for path in library.template_paths(recipe):     # a missing or unreadable template fails before anything is made,
+        MapFile(path, paths=False, limit=TEMPLATE_WORLD, records=TEMPLATE_RECORDS)   # not after a whole game run
     recipe['size'] = size
+    # The next update this map is made for, as it stands when the map starts (a map that ends after it closes keeps it).
+    declared = staging.key() if staging.active() else None
     # Settings made for a larger map may ask more land than this size reaches: brought down, and the map's own
     # record of its settings (what its check holds it to) says so.
     asked, most = recipe['terrain'].get('land_share'), recipes.land_share_max(size)
@@ -74,8 +78,8 @@ def generate(recipe_path, seed=None, size=None, note='', say=print):
     os.makedirs(job)
     world, job_settings = recipes.compile(recipe, job, seed)
     _write_json(os.path.join(job, 'job.json'), job_settings)
-    build = runner.game_build()
-    say(f'{name}: generating (game build {build}), size {size}, seed {seed}', flush=True)
+    build, branch = runner.game_build(), runner.game_branch()
+    say(f'{name}: generating (game build {build}, {branch}), size {size}, seed {seed}', flush=True)
     started = time.time()
     try:
         with runner.lock():
@@ -112,16 +116,21 @@ def generate(recipe_path, seed=None, size=None, note='', say=print):
         os.replace(table, library.prefab_table())
     _write_json(os.path.join(folder, 'recipe.json'), recipe)
     run = {'name': name, 'recipe': recipe['name'], 'size': size, 'seed': seed, 'note': note, 'state': state,
-           'game_build': build, 'wall_seconds': seconds, 'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(started)), **facts}
+           'game_build': build, 'game_branch': branch, 'next_update': declared, 'wall_seconds': seconds, 'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(started)), **facts}
     _write_json(os.path.join(folder, 'run.json'), run)
     shutil.rmtree(job, ignore_errors=True)
     say(f'{name}: {state} after {seconds} s', flush=True)
     if not made:
         reason = {'mod': 'the game did not load the mod (see log.txt.gz; after a game update run "python -m rustmapgen build-mod")',
-                  'timeout': 'the game took too long'}.get(state, 'the game made no map')
+                  'timeout': 'the game took too long',
+                  'crashed': f'the game\'s own map generation stopped with an error ({facts.get("game_error")}): the game itself '
+                             'cannot make this map; try another seed or size'
+                             + (' (a build before its release can fail so)' if staging.active() else '')}\
+            .get(state, 'the game made no map')
         raise RuntimeError(f'no map: {reason}. Folder: {folder}')
     census = os.path.join(folder, 'census.json')
-    if os.path.exists(census) and os.path.exists(library.prefab_table()):
+    # New Map offers the monuments of the public game: a run on the next update does not change that list.
+    if os.path.exists(census) and os.path.exists(library.prefab_table()) and not staging.active():
         try:
             recipes.build_catalog(library.prefab_table(), census)
         except (OSError, ValueError, KeyError) as error:
@@ -148,8 +157,8 @@ def load_test(name, say=print):
             for block in iter(lambda: handle.read(1 << 20), b''):
                 digest.update(block)
         _write_json(os.path.join(job, 'job.json'), {'Out': job, 'LoadTest': True})
-        build = runner.game_build()
-        say(f'{name}: the game (build {build}) loads final.map', flush=True)
+        build, branch, updated = runner.game_build(), runner.game_branch(), runner.game_updated()
+        say(f'{name}: the game (build {build}, {branch}) loads final.map', flush=True)
         url = 'file:///' + file.replace('\\', '/').lstrip('/')
         with runner.lock():
             identity = _identity()
@@ -168,7 +177,9 @@ def load_test(name, say=print):
                         break
                     if any(word in line for word in TROUBLE):
                         trouble.append(line.strip()[:200])
-        result = {'state': state, 'seconds': seconds, 'game_build': build, 'map_sha256': digest.hexdigest(), 'loaded': loaded,
+        # game_updated: when that game was last installed or updated, what tells a test on the released game (page/app.js).
+        result = {'state': state, 'seconds': seconds, 'game_build': build, 'game_branch': branch, 'game_updated': updated,
+                  'map_sha256': digest.hexdigest(), 'loaded': loaded,
                   'log_trouble': trouble[:12], 'tested_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), **facts}
         _write_json(os.path.join(folder, 'load.json'), result)
     finally:

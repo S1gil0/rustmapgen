@@ -39,7 +39,7 @@ def _root(variable, default):
 
 
 # Written back whole, so that the commands the panel starts (from another folder) find the same places.
-for _variable in ('RUSTMAPGEN_DATA', 'RUSTMAPGEN_GAME', 'RUSTMAPGEN_STEAMCMD'):
+for _variable in ('RUSTMAPGEN_DATA', 'RUSTMAPGEN_GAME', 'RUSTMAPGEN_GAME_NEXT', 'RUSTMAPGEN_STEAMCMD'):
     if os.environ.get(_variable):
         os.environ[_variable] = os.path.abspath(os.environ[_variable])
 

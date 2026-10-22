@@ -49,6 +49,11 @@ CHUNK = 1 << 20          # the game's LZ4 writer makes blocks of at most 1 MiB
 MAX_BLOCK = 16 * CHUNK
 MAX_WORLD = 2 << 30
 MAX_BLOCKS = 1 << 16    # a 6000 map has under 400
+MAX_RECORDS = 1_000_000  # prefabs, and paths: a 4000 map holds about 28,000 prefabs
+# A template is a small map: the ones seen (RustEdit, 2026-10-18) hold 6 MB at size 1000 and at most 170
+# prefabs. Read with these limits, a file that says it holds more is refused before anything is set aside.
+TEMPLATE_WORLD = 512 << 20                 # a map of 6,000 m, the largest the game makes (about 14 MB a km2 unpacked)
+TEMPLATE_RECORDS = 50_000
 # name -> (numpy type, layers); the resolution follows from the length.
 LAYERS = {'terrain': ('<i2', 1), 'height': ('<i2', 1), 'water': ('<i2', 1), 'splat': ('u1', 8),
           'biome': ('u1', 5), 'topology': ('<i4', 1), 'alpha': ('u1', 1)}
@@ -70,6 +75,8 @@ def varint(buf, pos):
         if byte < 0x80:
             return result, pos
         shift += 7
+        if shift >= 70:                         # a 64-bit number takes ten bytes at the most
+            raise ValueError(f'a number longer than ten bytes at byte {pos}')
 
 
 def raw_fields(buf, pos, end):
@@ -91,6 +98,8 @@ def raw_fields(buf, pos, end):
             pos += 8
         else:
             raise ValueError(f'wire type {wire} at byte {pos}')
+        if pos > end:                           # every field lies within the one that holds it
+            raise ValueError(f'a field runs past its end at byte {end}')
         yield key >> 3, wire, value
 
 
@@ -106,8 +115,9 @@ def _text(buf, span):
     return bytes(buf[span[0]:span[1]]).decode('utf-8', 'replace')
 
 
-def unpack(raw, path=''):
-    """Header and LZ4 chunks of a map file -> (version, timestamp, the protobuf bytes)."""
+def unpack(raw, path='', limit=MAX_WORLD):
+    """Header and LZ4 chunks of a map file -> (version, timestamp, the protobuf bytes). A file that says it
+    holds more than `limit` bytes is refused before anything is set aside for it."""
     version = struct.unpack_from('<I', raw, 0)[0] if len(raw) >= 4 else None
     if version not in VERSIONS:
         raise ValueError(f'{path}: not a Rust map (version {version})')
@@ -130,8 +140,11 @@ def unpack(raw, path=''):
                 raise ValueError(f'{path}: LZ4 chunk with multiple passes')
             if packed > length or pos + packed > end:
                 raise IndexError
-            if length > MAX_BLOCK or flags & 1 and length > 255 * packed + 64 or total + length > MAX_WORLD:
+            if length > MAX_BLOCK or flags & 1 and length > 255 * packed + 64:
                 raise ValueError(f'{path}: a block says it holds {length} bytes, more than a Rust map can')
+            if total + length > limit:
+                raise ValueError(f'{path}: unpacked it would hold more than {limit >> 20} MB, more than a map of the game\'s '
+                                 'largest size does')
             if len(chunks) >= MAX_BLOCKS:
                 raise ValueError(f'{path}: more than {MAX_BLOCKS} blocks, more than a Rust map has')
             chunks.append((flags & 1, pos, packed, total, length))
@@ -183,11 +196,13 @@ def encode_prefab(category, ident, position, rotation, scale):
 class MapFile:
     """`prefabs` are plain rows (category, id, position, rotation, scale); a path keeps its nodes."""
 
-    def __init__(self, path, paths=True):
+    def __init__(self, path, paths=True, limit=MAX_WORLD, records=MAX_RECORDS):
+        """limit: the most bytes the map may hold; records: the most prefabs and paths. A template is read
+        with TEMPLATE_WORLD and TEMPLATE_RECORDS."""
         self.path = path
         with open(path, 'rb') as handle:
             raw = handle.read()
-        self.version, self.timestamp, self.data = unpack(raw, path)
+        self.version, self.timestamp, self.data = unpack(raw, path, limit)
         del raw
         buf = memoryview(self.data)
         self.size = 0
@@ -207,6 +222,8 @@ class MapFile:
                         span = sub_value
                 self.spans[name] = span
             elif number == 3 and wire == 2:
+                if len(ids) >= records:
+                    raise ValueError(f'{path}: more than {records:,} prefabs')
                 category, ident = '', 0
                 position = rotation = scale = (0.0, 0.0, 0.0)
                 for sub, sub_wire, sub_value in raw_fields(buf, *value):
@@ -226,6 +243,8 @@ class MapFile:
                 rotations.append(rotation)
                 scales.append(scale)
             elif number == 4 and wire == 2 and paths:
+                if len(self.paths) >= records:
+                    raise ValueError(f'{path}: more than {records:,} paths')
                 name, width, nodes = '', 0.0, []
                 for sub, sub_wire, sub_value in raw_fields(buf, *value):
                     if sub == 1 and sub_wire == 2:

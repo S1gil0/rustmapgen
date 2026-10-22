@@ -46,7 +46,7 @@ if (-not $working) {
 }
 Write-Host 'Installing the Python packages it needs (numpy, Pillow, lz4)...'
 & $venv -m pip install --quiet --disable-pip-version-check --upgrade pip
-& $venv -m pip install --disable-pip-version-check -r requirements.txt
+& $venv -m pip install --quiet --disable-pip-version-check -r requirements.txt
 if ($LASTEXITCODE -ne 0) { throw 'Could not install the Python packages (numpy, Pillow, lz4).' }
 & $venv -m rustmapgen install @args
 if ($LASTEXITCODE -ne 0) { throw 'The install did not finish: see the lines above.' }

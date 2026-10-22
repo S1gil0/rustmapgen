@@ -38,7 +38,8 @@ def template_paths(recipe):
     for name in (recipe or {}).get('templates', []):
         path = paths.data('templates', name)
         if not os.path.isfile(path):
-            raise FileNotFoundError(f'the recipe asks for a template that is not in {paths.data("templates")}: {name}')
+            raise FileNotFoundError(f'the recipe asks for a template that is not in {paths.data("templates")}: {name} '
+                                    '(add it there, or take it out of the recipe\'s "templates")')
         try:
             with open(path + '.json') as handle:
                 info = json.load(handle)
@@ -84,7 +85,8 @@ def _card(entry):
                  'outpost_m': facts['outpost_from_centre_m'], 'land': facts['terrain'].get('land'),
                  'highest_m': facts['terrain'].get('highest_m'),
                  'checks_ok': sum(1 for c in entry['checks'] if c['ok']), 'checks': len(entry['checks']),
-                 'seconds': (entry.get('run') or {}).get('wall_seconds')})
+                 'seconds': (entry.get('run') or {}).get('wall_seconds'),
+                 'game_branch': (entry.get('run') or {}).get('game_branch') or 'public', 'game_build': (entry.get('run') or {}).get('game_build')})
     return card
 
 

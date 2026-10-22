@@ -9,3 +9,5 @@
 /mod/build/
 __pycache__/
 *.pyc
+# Held while RustMapGen updates itself.
+/rustmapgen-update.lock

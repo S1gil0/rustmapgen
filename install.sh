@@ -28,7 +28,7 @@ if ! .venv/bin/python -m pip --version >/dev/null 2>&1; then
 fi
 echo "Installing the Python packages it needs (numpy, Pillow, lz4)..."
 .venv/bin/python -m pip install --quiet --disable-pip-version-check --upgrade pip
-.venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+.venv/bin/python -m pip install --quiet --disable-pip-version-check -r requirements.txt
 .venv/bin/python -m rustmapgen install "$@"
 chmod +x rustmapgen.sh
 echo

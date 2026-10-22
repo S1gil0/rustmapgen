@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>3D map</title>
+<meta name="map3d-data" content="/3d/data">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
+<script type="importmap">{"imports":{"three":"/3d/viewer/vendor/three.module.min.js","three/addons/controls/OrbitControls.js":"/3d/viewer/vendor/OrbitControls.js","three/addons/objects/Sky.js":"/3d/viewer/vendor/Sky.js"}}</script>
+<style>
+:root { --bg: #0d1114; --panel: rgba(14, 18, 22, 0.86); --line: rgba(255, 255, 255, 0.12); --text: #e6e9ec; --dim: #9aa4ad; --accent: #e0a243; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+.panel { position: fixed; top: 12px; left: 12px; width: min(300px, calc(100vw - 24px)); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; backdrop-filter: blur(6px); }
+.panel h1 { font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+.panel .sub { color: var(--dim); margin-bottom: 8px; }
+.panel select { width: 100%; background: #1a2026; color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 5px 6px; font: inherit; margin-bottom: 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 4px 0; }
+.row label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+.row input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.buttons { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+button { background: #1f262d; color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 5px 9px; font: inherit; cursor: pointer; }
+button:hover { border-color: rgba(255, 255, 255, 0.3); }
+.help { color: var(--dim); font-size: 12px; margin-top: 8px; }
+.note { color: var(--dim); font-size: 12px; margin-top: 8px; border-left: 2px solid var(--accent); padding-left: 7px; }
+.row label.nobuild { font-weight: 600; }
+.row label.nobuild input { accent-color: #e5483a; }
+.note.nobuild-note { border-left-color: #e5483a; margin: 2px 0 8px; }
+[hidden] { display: none !important; }
+.fold { position: fixed; top: 12px; left: 12px; display: none; }
+.folded .panel { display: none; }
+.folded .fold { display: block; }
+.stats { position: fixed; left: 12px; bottom: 12px; max-width: calc(100vw - 24px); white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--dim); pointer-events: none; }
+.stats b { color: var(--text); font-weight: 600; }
+.loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--dim); pointer-events: none; font-size: 14px; }
+.labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.label { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 4px; transform-origin: 0 50%; white-space: nowrap; color: #fff; font-size: 12px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6); will-change: transform; }
+.label img { width: 22px; height: 22px; flex: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)); }
+.label .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; border: 2px solid #222; flex: none; }
+.label.minor { font-size: 11px; font-weight: 500; opacity: 0.9; }
+.label.minor img { width: 16px; height: 16px; }
+.label.only-icon span { display: none; }
+.flying-hint { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; color: var(--dim); font-size: 12px; pointer-events: none; white-space: nowrap; }
+.flying .flying-hint { display: block; }
+@media (max-width: 600px) {
+  .panel { padding: 8px 10px; }
+  .help { display: none; }
+  .stats { font-size: 11px; }
+}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div class="labels" id="labels"></div>
+<div class="loading" id="loading" data-word="loading">Loading the map…</div>
+<button class="fold" id="unfold">☰ <span data-word="map">Map</span></button>
+<div class="panel" id="panel">
+  <h1 id="title" data-word="title">3D map</h1>
+  <div class="sub" id="subtitle"></div>
+  <div class="row"><label class="nobuild"><input type="checkbox" id="show-nobuild"> <span data-word="noBuild">No-build zones</span></label></div>
+  <div class="note nobuild-note" data-word="noBuildNote"></div>
+  <div class="row">
+    <label><input type="checkbox" id="show-names" checked> <span data-word="names">Names</span></label>
+    <label><input type="checkbox" id="show-monuments" checked> <span data-word="monuments">Monuments</span></label>
+    <label><input type="checkbox" id="show-rocks" checked> <span data-word="rocks">Rocks</span></label>
+    <label><input type="checkbox" id="show-trees" checked> <span data-word="trees">Trees</span></label>
+    <label><input type="checkbox" id="show-rails" checked> <span data-word="rails">Rails</span></label>
+    <label><input type="checkbox" id="show-roads"> <span data-word="roads">Roads</span></label>
+    <label><input type="checkbox" id="show-clouds" checked> <span data-word="clouds">Clouds</span></label>
+  </div>
+  <div class="row"><label for="hours" data-word="time">Time</label><input type="range" id="hours" min="5" max="21" step="0.25" value="14"><span id="hours-value">14:00</span></div>
+  <div class="row"><label for="quality" data-word="detail">Detail</label>
+    <select id="quality" style="width:auto;margin:0"><option value="auto">Auto</option><option value="low">Low</option><option value="high">High</option></select>
+  </div>
+  <div class="buttons"><button id="overview" data-word="whole">Whole map</button><button id="hide" data-word="hide">Hide panel</button></div>
+  <div class="note" id="no-models" data-word="noModels" hidden></div>
+  <div class="note" data-word="treesNote"></div>
+  <div class="help" data-word="help"></div>
+</div>
+<div class="stats" id="stats" hidden></div>
+<div class="flying-hint" data-word="flying"></div>
+<script type="module" src="/3d/map3d.js"></script>
+</body>
+</html>

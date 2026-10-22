@@ -2,7 +2,7 @@
   "name": "medium",
   "title": "Medium",
   "size": 3000,
-  "source": "Every big monument set to \"Prefer\" (placed first, on any map size) and the unwanted ones to \"Never\": caves, swamps, wells, two of the ice lakes, the Ranch, the Large Barn and the Bandit Camp, and on this size also Radtown and the jungle ruins, to leave room. The Outpost is searched from the middle of the map outwards (Outpost section). The land (Basics): Island \"Set the size\" at 61 % of the square, Hills \"Lower\", Shallows \"Wide\", like the maps busy community servers run; the game alone makes less land and taller hills, and some wanted monuments then find no room.",
+  "source": "21 monuments wanted, the Outpost near the middle, a rail ring; no Bandit Camp, ranches, Radtown, jungle ruins, caves, swamps or wells. 61 % land, lower hills, wide shallows.",
   "world": {
     "MainRoads": true,
     "SideRoads": true,

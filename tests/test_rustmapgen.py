@@ -4,9 +4,12 @@
     python -m unittest discover -s tests        (or: python tests/test_rustmapgen.py)
 """
 import glob
+import gzip
+import hashlib
 import io
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -74,9 +77,10 @@ class Isolated(unittest.TestCase):
 
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
-        self.saved = {key: os.environ.get(key) for key in ('RUSTMAPGEN_DATA', 'RUSTMAPGEN_GAME')}
+        self.saved = {key: os.environ.get(key) for key in ('RUSTMAPGEN_DATA', 'RUSTMAPGEN_GAME', 'RUSTMAPGEN_GAME_NEXT')}
         os.environ['RUSTMAPGEN_DATA'] = os.path.join(self.folder.name, 'data')
         os.environ['RUSTMAPGEN_GAME'] = os.path.join(self.folder.name, 'game')
+        os.environ['RUSTMAPGEN_GAME_NEXT'] = os.path.join(self.folder.name, 'game-next')
         paths.ensure_data()
 
     def tearDown(self):
@@ -181,6 +185,69 @@ class MapFileTest(unittest.TestCase):
         # one the game's own prefab table gives the Outpost.
         self.assertEqual(mapfile.prefab_id(MONUMENT), mapfile.prefab_id(MONUMENT.upper()))
         self.assertEqual(mapfile.prefab_id(MONUMENT), 1879405026)
+
+
+class TemplateLimitsTest(unittest.TestCase):
+    """A template is someone else's file: what reading it may cost is bounded before it is read."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+
+    def test_a_file_that_says_it_holds_too_much_is_refused_before_anything_is_unpacked(self):
+        # About 2 MB that says it holds 33 blocks of 16 MiB: more than a template may, though each block passes alone.
+        block = mapfile.MAX_BLOCK
+        packed = block // 255 + 1
+        body = struct.pack('<I', 10) + struct.pack('<q', 0)
+        for _ in range(33):
+            body += mapfile._varint_bytes(1) + mapfile._varint_bytes(block) + mapfile._varint_bytes(packed) + bytes(packed)
+        path = os.path.join(self.folder.name, 'big.map')
+        with open(path, 'wb') as handle:
+            handle.write(body)
+        unpacked = []
+        decompress = mapfile.lz4.block.decompress
+        self.addCleanup(setattr, mapfile.lz4.block, 'decompress', decompress)
+        mapfile.lz4.block.decompress = lambda *a, **k: unpacked.append(1) or decompress(*a, **k)
+        with self.assertRaises(ValueError) as caught:
+            mapfile.MapFile(path, paths=False, limit=mapfile.TEMPLATE_WORLD, records=mapfile.TEMPLATE_RECORDS)
+        self.assertIn('more than 512 MB', str(caught.exception))
+        self.assertEqual(unpacked, [])
+
+    def test_a_template_saved_from_a_large_map_is_read(self):
+        # A template cut from a map of about 3,300 m unpacks to some 150 MB (a 6,000 m map to some 500): read as before.
+        res = 5000
+        world = _world(3300, [('Decor', 77, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))], res=res)
+        self.assertGreater(len(world), 128 << 20)
+        path = os.path.join(self.folder.name, 'large.map')
+        body = struct.pack('<I', 10) + struct.pack('<q', 0)
+        for start in range(0, len(world), 1 << 20):      # in the game's own blocks of 1 MiB
+            chunk = world[start:start + (1 << 20)]
+            packed = lz4.block.compress(chunk, store_size=False)
+            body += mapfile._varint_bytes(3) + mapfile._varint_bytes(len(chunk)) + mapfile._varint_bytes(len(packed)) + packed
+        with open(path, 'wb') as handle:
+            handle.write(body)
+        del world
+        read = mapfile.MapFile(path, paths=False, limit=mapfile.TEMPLATE_WORLD, records=mapfile.TEMPLATE_RECORDS)
+        self.assertEqual((read.size, len(read.id)), (3300, 1))
+
+    def test_a_number_longer_than_ten_bytes_and_a_field_past_its_end_are_refused(self):
+        with self.assertRaises(ValueError):
+            mapfile.varint(bytes([0x80] * 11 + [0x01]), 0)
+        self.assertEqual(mapfile.varint(bytes([0xff] * 9 + [0x01]), 0)[1], 10)
+        field = mapfile._varint_bytes(3 << 3 | 2) + mapfile._varint_bytes(50) + b'short'
+        with self.assertRaises(ValueError):
+            list(mapfile.raw_fields(field, 0, len(field)))
+
+    def test_a_template_with_more_prefabs_than_a_template_holds_is_refused(self):
+        path = os.path.join(self.folder.name, 'crowd.map')
+        _write(path, _world(1000, [('Decor', 77, (float(i), 0.0, 0.0), (0.0, 0.0, 0.0)) for i in range(12)]))
+        records = templates.TEMPLATE_RECORDS
+        self.addCleanup(setattr, templates, 'TEMPLATE_RECORDS', records)
+        templates.TEMPLATE_RECORDS = 10
+        with self.assertRaises(ValueError) as caught:
+            templates.Template(path, {77: 'assets/bundled/prefabs/autospawn/decor/x.prefab'})
+        self.assertIn('more than 10 prefabs', str(caught.exception))
+        self.assertEqual(len(mapfile.MapFile(path).id), 12)          # read as a whole map, it is fine
 
 
 class RailNetworkTest(unittest.TestCase):
@@ -623,6 +690,39 @@ class RunnerTest(Isolated):
         self.assertEqual((state, facts['mod_loaded'], facts['exit_code']), ('done', True, 0))
         self.assertTrue(os.path.isfile(paths.game('HarmonyMods', runner.MOD_FILE)))
 
+    CRASH = '''
+            echo "[RustMapGen] patches active" >> "$LOG"
+            echo "[1.1s] Caves" >> "$LOG"
+            echo "DivideByZeroException: Attempted to divide by zero." >> "$LOG"
+            echo "  at SeedRandom.Range (System.UInt32& seed, System.Int32 min, System.Int32 max) [0x0000b] in <2bc6>:0 " >> "$LOG"
+            echo "  at GenerateDungeonBase.Process (System.UInt32 seed) [0x0019a] in <7e9d>:0 " >> "$LOG"
+            echo "  at WorldSetup+<InitCoroutine>d__20.MoveNext () [0x00a1a] in <7e9d>:0 " >> "$LOG"
+            '''
+
+    def test_a_game_whose_own_map_generation_crashed_is_stopped(self):
+        # A staging build of 2026-10 fails so on small maps, with or without the mod: the game then idles until the time limit.
+        self.addCleanup(setattr, runner, 'CRASH_PATIENCE', runner.CRASH_PATIENCE)
+        runner.CRASH_PATIENCE = 3
+        self.game(self.PRELUDE + self.CRASH + '''
+            sleep 60
+            ''')
+        started = time.monotonic()
+        state, _, facts = self.run_game()
+        self.assertEqual((state, facts['game_error'], facts['mod_loaded']), ('crashed', 'DivideByZeroException in GenerateDungeonBase.Process', True))
+        self.assertLess(time.monotonic() - started, 20)
+
+    def test_an_error_the_map_goes_on_after_is_not_a_crash(self):
+        self.addCleanup(setattr, runner, 'CRASH_PATIENCE', runner.CRASH_PATIENCE)
+        runner.CRASH_PATIENCE = 3
+        self.game(self.PRELUDE + self.CRASH + '''
+            sleep 1
+            echo "[0.4s] Tiny Monuments" >> "$LOG"
+            sleep 5
+            echo saved > "$JOB/done"
+            ''')
+        state, _, facts = self.run_game()
+        self.assertEqual((state, facts['game_error']), ('done', None))
+
     def test_a_game_that_failed_to_patch_is_stopped_at_once(self):
         self.game(self.PRELUDE + '''
             echo "Failed to patch all hooks" >> "$LOG"
@@ -646,6 +746,8 @@ class RunnerTest(Isolated):
             runner.MOD_PATIENCE = patience
         self.assertEqual((state, facts['mod_loaded']), ('mod', False))
         self.assertLess(time.monotonic() - started, 20)
+        # Silence is no word of the game: a slow start does not keep every later map of this build from being made.
+        self.assertIsNone(runner.mod_broken())
 
     def test_a_game_that_begins_the_map_without_the_mod_is_stopped_at_once(self):
         self.game(self.PRELUDE + '''
@@ -656,6 +758,7 @@ class RunnerTest(Isolated):
         state, _, facts = self.run_game()
         self.assertEqual((state, facts['mod_loaded']), ('mod', False))
         self.assertLess(time.monotonic() - started, 20)
+        self.assertIsNotNone(runner.mod_broken())          # the game said so: not tried again on this build
 
     def test_the_map_begun_before_the_mod_in_one_read_is_still_stopped(self):
         self.game(self.PRELUDE + '''
@@ -936,7 +1039,22 @@ class ServerTest(Isolated):
         self.assertEqual(self.queue.jobs, [])
         go.set()
         first.join(10)
-        self.assertEqual((answers, self.queue.held), ([200], False))
+        # Updated: the panel still runs the code it had, so it stays held until it starts again.
+        self.assertEqual((answers, self.queue.held), ([200], True))
+        self.assertEqual(self.ask('/api/load-test', data=b'{"name":"test-map-1"}', headers=marked, method='POST')[0], 409)
+        self.assertEqual(self.ask('/api/app-update', data=b'{}', headers=marked, method='POST')[0], 409)
+
+    def test_no_job_starts_while_an_update_of_rustmapgen_is_unfinished(self):
+        marked = {'Content-Type': 'application/json', 'X-RustMapGen': '1'}
+        release._keep_pending('0.2.0')
+        for path, body in (('/api/generate', b'{"recipe":"large"}'), ('/api/load-test', b'{"name":"test-map-1"}'), ('/api/game-update', b'{}')):
+            code, answer = self.ask(path, data=body, headers=marked, method='POST')
+            self.assertEqual(code, 409, path)
+            self.assertIn('did not finish', answer.decode(), path)
+        self.assertEqual(self.queue.add([{'kind': 'load-test', 'name': 'test-map-1'}]), 0)
+        maps = json.loads(self.ask('/api/maps')[1])
+        self.assertEqual(maps['install']['update_pending'], '0.2.0')
+        release._keep_pending(None)
         self.assertEqual(self.ask('/api/load-test', data=b'{"name":"test-map-1"}', headers=marked, method='POST')[0], 200)
 
     def test_settings_are_saved_beside_the_data_and_never_over_a_preset(self):
@@ -981,6 +1099,110 @@ class ServerTest(Isolated):
         self.assertFalse(os.path.exists(paths.data('maps', 'test-map-1')))
         self.assertEqual(self.ask('/api/maps/test-map-1', headers={'X-RustMapGen': '1'}, method='DELETE')[0], 404)
         self.assertEqual(self.ask('/api/maps/..', headers={'X-RustMapGen': '1'}, method='DELETE')[0], 404)
+
+
+    def test_the_3d_view_of_a_map_is_made_when_it_is_asked_for(self):
+        _three_d_map(paths.data('maps', 'test-map-1', 'final.map'))
+        self.assertEqual(self.ask('/3d/open?name=no-such-map')[0], 404)
+        request = urllib.request.Request(self.base + '/3d/open?name=test-map-1&for=Mine')
+        opener = urllib.request.build_opener(type('Stay', (urllib.request.HTTPRedirectHandler,), {'redirect_request': lambda *a, **k: None}))
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            opener.open(request, timeout=10)
+        key = server.three_d_key('test-map-1')
+        self.assertEqual((caught.exception.code, caught.exception.headers['Location']), (302, f'/3d/?id={key}&for=Mine'))
+        status, body = self.ask(f'/3d/data/{key}/3d_meta.json')
+        self.assertEqual(status, 200)
+        self.assertEqual((json.loads(body)['models'], json.loads(body)['placed'][0]['short']), ('none', 'compound'))
+        self.assertTrue(os.path.isfile(paths.data('maps', 'test-map-1', '3d_heights.png')))
+        self.assertEqual(self.ask(f'/3d/data/{key}/3d_trees.bin')[0], 200)
+        self.assertEqual(self.ask(f'/3d/data/{key}/final.map')[0], 404)
+        self.assertEqual(self.ask('/3d/data/0123456789abcdef/3d_meta.json')[0], 404)
+        # Without models the page gets empty ones, and draws the ground.
+        self.assertEqual(self.ask('/3d/data/3d-models/none/monuments/index.json'), (200, b'{}'))
+        self.assertEqual(self.ask('/3d/data/3d-models/none/scenery/far.bin.gz')[0], 200)
+        self.assertEqual(self.ask('/3d/data/3d-models/25902425-0123456789/monuments/index.json')[0], 404)
+        self.assertEqual(self.ask('/3d/data/3d-models/..%2F..%2Fmaps/monuments/index.json')[0], 404)
+
+    def test_the_3d_page_and_its_scripts_are_served(self):
+        self.assertEqual(self.ask('/3d/')[0], 200)
+        with urllib.request.urlopen(self.base + '/3d/viewer/vendor/three.module.min.js', timeout=10) as response:
+            self.assertTrue(response.headers['Content-Type'].startswith('text/javascript'))
+        self.assertEqual(self.ask('/3d/map3d.js')[0], 200)
+        self.assertEqual(self.ask('/3d/viewer/vendor/three.LICENSE')[0], 404)
+        self.assertEqual(self.ask('/3d/..%2Fserver.py')[0], 404)
+        self.assertEqual(self.ask('/3d/index.html')[0], 404)
+
+    def test_the_models_are_asked_for_from_the_panel_only(self):
+        self.assertEqual(json.loads(self.ask('/api/status')[1])['three_d'], {'ready': False, 'game': False, 'failed': None})
+        body = b'{}'
+        self.assertEqual(self.ask('/api/models-3d', data=body, headers={'Content-Type': 'application/json'}, method='POST')[0], 403)
+        marked = {'Content-Type': 'application/json', 'X-RustMapGen': '1'}
+        status, answer = self.ask('/api/models-3d', data=body, headers=marked, method='POST')
+        self.assertEqual(status, 409)
+        self.assertIn('install the game first', json.loads(answer)['error'])
+
+    def test_maps_of_the_next_update_are_made_in_its_days_only_on_its_game_brought_up_first(self):
+        from unittest import mock
+        from rustmapgen import staging
+        marked = {'Content-Type': 'application/json', 'X-RustMapGen': '1'}
+        body = json.dumps({'recipe': 'small', 'count': 2, 'game': 'staging'}).encode()
+        with mock.patch.object(staging, 'refusal', return_value='maps for the next update are made from Sat 31 Oct'):
+            status, answer = self.ask('/api/generate', data=body, headers=marked, method='POST')
+            self.assertEqual((status, json.loads(answer)['error']), (409, 'maps for the next update are made from Sat 31 Oct'))
+            self.assertEqual(self.ask('/api/load-test', data=b'{"name":"test-map-1","game":"staging"}', headers=marked, method='POST')[0], 409)
+        self.assertEqual(self.ask('/api/generate', data=b'{"recipe":"small","game":"beta"}', headers=marked, method='POST')[0], 400)
+        self.assertEqual(self.ask('/api/remove-staging', data=b'{}', headers=marked, method='POST')[0], 404)   # none there
+        with mock.patch.object(staging, 'refusal', return_value=None):
+            status, answer = self.ask('/api/generate', data=body, headers=marked, method='POST')
+        self.assertEqual(status, 200)
+        self.assertIn("2 maps queued for the next update, after its game is brought to Steam's newest build of its branch", json.loads(answer)['message'])
+        state = self.queue.status()
+        jobs = ([state['job']] if state['job'] else []) + state['queue']
+        self.assertEqual([(job['kind'], job.get('game')) for job in jobs], [('update', 'staging'), ('generate', 'staging'), ('generate', 'staging')])
+        self.assertIn('come with an update of RustMapGen', json.loads(self.ask('/api/status')[1])['staging']['reason'])
+        os.makedirs(paths.data('..', 'game-next'))
+        self.assertEqual(self.ask('/api/remove-staging', data=b'{}', headers=marked, method='POST')[0], 409)   # not while jobs wait
+
+    def test_a_map_of_the_next_update_is_load_tested_on_the_public_game_brought_to_the_release_first(self):
+        with open(paths.data('maps', 'test-map-1', 'map.json'), 'w') as handle:
+            json.dump({'name': 'test-map-1', 'run': {'game_branch': 'release'}}, handle)
+        marked = {'Content-Type': 'application/json', 'X-RustMapGen': '1'}
+        status, _ = self.ask('/api/load-test', data=b'{"name":"test-map-1","game":"public"}', headers=marked, method='POST')
+        self.assertEqual(status, 200)
+        state = self.queue.status()
+        jobs = ([state['job']] if state['job'] else []) + state['queue']
+        self.assertEqual([job['kind'] for job in jobs], ['update', 'load-test'])
+        self.assertEqual(server.job_arguments({'kind': 'update', 'if_newer': True}), ['update', '--if-newer'])
+
+    def test_a_load_test_on_the_next_update_is_on_steams_newest_release_build(self):
+        from unittest import mock
+        from rustmapgen import staging
+        os.makedirs(paths.data('..', 'game-next'))
+        open(runner.executable(staging.folder()), 'w').close()
+        marked = {'Content-Type': 'application/json', 'X-RustMapGen': '1'}
+        with mock.patch.object(staging, 'refusal', return_value=None):
+            status, _ = self.ask('/api/load-test', data=b'{"name":"test-map-1","game":"staging"}', headers=marked, method='POST')
+        self.assertEqual(status, 200)
+        state = self.queue.status()
+        jobs = ([state['job']] if state['job'] else []) + state['queue']
+        self.assertEqual([(job['kind'], job.get('game')) for job in jobs], [('update', 'staging'), ('load-test', 'staging')])
+
+    def test_a_game_older_than_the_forced_wipe_is_brought_to_its_update_before_public_maps(self):
+        from unittest import mock
+        from rustmapgen import game
+        marked = {'Content-Type': 'application/json', 'X-RustMapGen': '1'}
+        body = json.dumps({'recipe': 'small', 'count': 2}).encode()
+        with mock.patch.object(game, 'behind_forced_wipe', return_value=True):
+            status, answer = self.ask('/api/generate', data=body, headers=marked, method='POST')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(answer)['message'], "2 maps queued, after the game is brought to the forced wipe's update, when it is out")
+        state = self.queue.status()
+        jobs = ([state['job']] if state['job'] else []) + state['queue']
+        self.assertEqual([(job['kind'], job.get('forced_wipe')) for job in jobs], [('update', True), ('generate', None), ('generate', None)])
+        self.assertEqual(server.job_arguments({'kind': 'update', 'forced_wipe': True}), ['update', '--forced-wipe'])
+        with mock.patch.object(game, 'behind_forced_wipe', return_value=False):
+            status, answer = self.ask('/api/generate', data=body, headers=marked, method='POST')
+        self.assertEqual(json.loads(answer)['message'], '2 maps queued')
 
 
 class PictureTest(unittest.TestCase):
@@ -1279,6 +1501,25 @@ class BranchTest(Isolated):
                           '  downloading the game: 50 % (3.1 of 6.1 GB)', '  downloading the game: 99 % (6.1 of 6.1 GB)',
                           '  writing the game files: 40 % (2.4 of 6.1 GB)'])
 
+    def test_a_finished_step_is_shown_full_on_a_terminal(self):
+        from unittest import mock
+
+        class Screen(io.StringIO):
+            def isatty(self):
+                return True
+        for done, last in ((True, 100), (False, 18)):
+            screen = Screen()
+            with mock.patch.object(sys, 'stdout', screen):
+                seen, end = self.game._progress(print)
+                for line in (' Update state (0x61) downloading, progress: 99.90 (6105650360 / 6111762123)',
+                             ' Update state (0x5) verifying update, progress: 18.00 (1100117182 / 6111762123)'):
+                    seen(line)
+                end(done)
+            shown = [part.split('\r')[-1].rstrip() for part in screen.getvalue().split('\n') if part.strip()]
+            # steamcmd's last word on the download was 99.9 %: once it went on to checking, the download is done.
+            self.assertEqual(shown[0], '  downloading the game               [####################] 100 %  6.1 of 6.1 GB')
+            self.assertIn(f'{last:3d} %', shown[1])     # the last step: full once steamcmd ended well, as it was otherwise
+
     def test_steam_is_asked_for_the_builds_of_both_branches(self):
         with open(self.game.steamcmd_program(), 'w') as handle:
             handle.write('#!/bin/sh\nprintf \'\\033[0m\\t"branches"\\n\\t{\\n\\t\\t"public"\\n\\t\\t{\\n\\t\\t\\t"buildid"\\t\\t"25902425"\\n\\t\\t}\\n'
@@ -1303,7 +1544,7 @@ class BranchTest(Isolated):
                     time.sleep(0.05)
                 raise OSError('the terminal is gone')
 
-            def end():
+            def end(done=False):
                 raise OSError('the terminal is gone')
             return seen, end
         progress = self.game._progress
@@ -1311,6 +1552,17 @@ class BranchTest(Isolated):
         self.game._progress = broken
         with self.assertRaises(OSError):
             self.game._steamcmd([self.game.steamcmd_program()], say=lambda *a, **k: None)
+        with open(child) as handle:
+            pid = int(handle.read())
+        time.sleep(0.3)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+
+    def test_what_steamcmd_leaves_running_when_it_ends_is_stopped(self):
+        child = os.path.join(self.folder.name, 'child-pid')
+        with open(self.game.steamcmd_program(), 'w') as handle:
+            handle.write(f'#!/bin/sh\nsleep 60 >/dev/null 2>&1 &\necho $! > {child}\nexit 0\n')
+        self.game._steamcmd([self.game.steamcmd_program()], say=lambda *a, **k: None)
         with open(child) as handle:
             pid = int(handle.read())
         time.sleep(0.3)
@@ -1372,6 +1624,9 @@ class SelfUpdateTest(unittest.TestCase):
         self.copy = tempfile.TemporaryDirectory()
         self.root, self.api, self.launcher = paths.ROOT, release.API, os.environ.pop('RUSTMAPGEN_LAUNCHER', None)
         self.data = os.environ.get('RUSTMAPGEN_DATA')
+        # The stand-in copy is 0.1.0 and its newest tag 0.2.0, whatever version this code is.
+        self.addCleanup(setattr, release, '__version__', release.__version__)
+        release.__version__ = '0.1.0'
         paths.ROOT = self.copy.name
         os.environ['RUSTMAPGEN_DATA'] = os.path.join(self.copy.name, 'data')
         # pip is not run in the tests: each call is counted, and may be told to fail.
@@ -1439,6 +1694,7 @@ class SelfUpdateTest(unittest.TestCase):
     def test_the_newest_tag_is_found_and_put_in_place_over_a_zip_copy(self):
         found = release.check()
         self.assertEqual((found['current'], found['latest'], found['newer'], found['how']), (release.__version__, '0.2.0', True, 'zip'))
+        self.assertEqual(found['notes'], 'https://github.com/S1gil0/rustmapgen/blob/v0.2.0/CHANGELOG.md')
         os.environ['RUSTMAPGEN_LAUNCHER'] = '1'
         self.addCleanup(os.environ.pop, 'RUSTMAPGEN_LAUNCHER', None)
         done = release.apply(found)
@@ -1519,6 +1775,19 @@ class SelfUpdateTest(unittest.TestCase):
         release.apply(release.check())
         self.assertNotIn('unfinished', release.check())               # done; a new panel reads 0.2.0 from the file
 
+    def test_finish_update_completes_an_unfinished_one_and_one_update_at_a_time_per_folder(self):
+        release._keep_pending('0.2.0')
+        said = []
+        done = release.finish(say=lambda text, **_: said.append(text))
+        self.assertEqual((done['version'], self.read('rustmapgen/__init__.py'), release.pending()), ('0.2.0', "__version__ = '0.2.0'\n", None))
+        self.assertEqual(release.finish(say=lambda text, **_: said.append(text)), None)
+        self.assertIn('no update of RustMapGen is unfinished', said)
+        with open(os.path.join(self.copy.name, 'rustmapgen/__init__.py'), 'w') as handle:
+            handle.write("__version__ = '0.1.0'\n")
+        with release._install_lock():
+            with self.assertRaises(RuntimeError):            # another panel or command updating this folder
+                release.apply(release.check())
+
     def test_a_failed_package_install_changes_nothing_and_a_retry_installs_them(self):
         self.pip_fails = 1
         with self.assertRaises(RuntimeError):
@@ -1559,6 +1828,31 @@ class SelfUpdateTest(unittest.TestCase):
                 release.apply(dict(release.check(), how='development'))
 
 
+class FinishUpdateCommandTest(Isolated):
+    """finish-update needs nothing of RustMapGen but its release module: it works when the rest cannot load."""
+
+    def test_it_runs_when_another_module_is_broken_and_game_work_waits_for_it(self):
+        import shutil
+        import subprocess
+        copy = os.path.join(self.folder.name, 'copy')
+        shutil.copytree(os.path.join(ROOT, 'rustmapgen'), os.path.join(copy, 'rustmapgen'), ignore=shutil.ignore_patterns('__pycache__'))
+        with open(os.path.join(copy, 'rustmapgen', 'server.py'), 'w') as handle:
+            handle.write('this is not python\n')           # half of an update: a module that cannot load
+        env = dict(os.environ, PYTHONPATH=copy)
+
+        def run(*arguments):
+            return subprocess.run([sys.executable, '-m', 'rustmapgen'] + list(arguments), cwd=copy, env=env, capture_output=True, text=True, timeout=60)
+        finished = run('finish-update')
+        self.assertEqual(finished.returncode, 0, finished.stderr)
+        self.assertIn('no update of RustMapGen is unfinished', finished.stdout)
+        os.makedirs(paths.data(), exist_ok=True)
+        with open(paths.data('update-pending.json'), 'w') as handle:
+            json.dump({'version': '0.2.0', 'started': 'now'}, handle)
+        refused = run('generate', '--recipe', 'small')
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('finish-update', refused.stderr)
+
+
 class ModChoiceTest(Isolated):
     """A mod built here is used only while it was built from the source as it is now."""
 
@@ -1596,6 +1890,64 @@ class ModChoiceTest(Isolated):
         self.assertEqual(os.path.basename(os.path.dirname(runner.mod_source())), 'prebuilt')
         os.unlink(os.path.join(paths.ROOT, 'mod', 'build', 'build.json'))
         self.assertEqual(os.path.basename(os.path.dirname(runner.mod_source())), 'prebuilt')
+
+
+class ModBuildTest(Isolated):
+    """The mod is built at install only when the one that came with the code is for another game build, and only with a
+    .NET SDK that can (8 or newer): an older one is said in a line, not in a compiler's error."""
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(setattr, paths, 'ROOT', paths.ROOT)
+        paths.ROOT = os.path.join(self.folder.name, 'code')
+        os.makedirs(os.path.join(paths.ROOT, 'mod', 'prebuilt'))
+        with open(os.path.join(paths.ROOT, 'mod', 'prebuilt', 'build.json'), 'w') as handle:
+            json.dump({'game_build': '25902425'}, handle)
+
+    def install(self, build):
+        from unittest import mock
+        from rustmapgen import game
+        said = []
+        with mock.patch.object(game, 'update_game'), mock.patch.object(runner, 'game_build', return_value=build), \
+                mock.patch.object(runner, 'describe_mod', return_value='prebuilt'), mock.patch.object(runner, 'install_mod'), \
+                mock.patch.object(runner, 'describe_install', return_value={}), \
+                mock.patch.object(game.shutil, 'which', return_value='/usr/bin/dotnet'), \
+                mock.patch.object(game, 'build_mod') as built:
+            game.install(say=lambda text, **_: said.append(text))
+        return built.called
+
+    def test_the_mod_is_built_at_install_only_for_another_game_build(self):
+        self.assertFalse(self.install('25902425'))      # the one that came with the code is for this game
+        self.assertTrue(self.install('26200000'))       # a later game: built here, when it can be
+
+    def test_an_older_sdk_is_said_plainly_and_nothing_is_built(self):
+        from unittest import mock
+        from rustmapgen import game
+        runs = []
+
+        def dotnet(argv, **kwargs):
+            runs.append(argv[1])
+            return mock.Mock(returncode=0, stdout='6.0.428 [C:\\Program Files\\dotnet\\sdk]\n7.0.410 [C:\\Program Files\\dotnet\\sdk]\n')
+        with mock.patch.object(game.shutil, 'which', return_value='dotnet'), mock.patch.object(game.subprocess, 'run', side_effect=dotnet):
+            with self.assertRaisesRegex(RuntimeError, 'has the .NET SDK 7; the mod is built with the .NET SDK 8 or newer'):
+                game.build_mod(say=lambda *a, **k: None)
+        self.assertEqual(runs, ['--list-sdks'])          # no `dotnet build`
+        with mock.patch.object(game.subprocess, 'run', return_value=mock.Mock(stdout='8.0.100 [/usr/share/dotnet/sdk]\n9.0.101 [x]\n')):
+            self.assertEqual(game.sdk_version('dotnet'), 9)
+        with mock.patch.object(game.subprocess, 'run', return_value=mock.Mock(stdout='')):
+            self.assertIsNone(game.sdk_version('dotnet'))     # the runtime only
+
+
+class PrebuiltTest(unittest.TestCase):
+    def test_the_mod_that_comes_with_the_code_is_built_from_its_source(self):
+        # A source changed without a new prebuilt mod would ship a mod that ignores what the new code asks of it.
+        with open(os.path.join(ROOT, 'mod', 'prebuilt', 'build.json')) as handle:
+            record = json.load(handle)
+        with open(os.path.join(ROOT, 'mod', 'RustMapGen.cs'), 'rb') as handle:
+            self.assertEqual(record['source_sha256'], hashlib.sha256(handle.read()).hexdigest(),
+                             'mod/RustMapGen.cs changed: build the mod again into mod/prebuilt and record it in build.json')
+        with open(os.path.join(ROOT, 'mod', 'prebuilt', runner.MOD_FILE), 'rb') as handle:
+            self.assertEqual(record['sha256'], hashlib.sha256(handle.read()).hexdigest())
 
 
 class CatalogTest(Isolated):
@@ -1662,6 +2014,19 @@ class SafetyTest(Isolated):
         self.assertEqual(seen, [0.5])
         self.assertIn('land 62 % brought to 50 %, the most for a map of 2,000', said)
 
+    def test_a_template_the_run_would_refuse_is_refused_before_the_game_starts(self):
+        from unittest import mock
+        from rustmapgen import generate
+        os.makedirs(paths.data('templates'), exist_ok=True)
+        _write(paths.data('templates', 'big.map'), _world(800, [('Decor', 77, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))]))
+        path = paths.data('with-template.json')
+        with open(path, 'w') as handle:
+            json.dump(dict(recipes.defaults(), name='with-template', templates=['big.map']), handle)
+        with mock.patch.object(generate, 'TEMPLATE_WORLD', 10), mock.patch.object(recipes, 'compile') as compiled:
+            with self.assertRaisesRegex(ValueError, 'more than 0 MB'):
+                generate.generate(path, seed=1, size=2000, say=lambda *a, **k: None)
+            compiled.assert_not_called()               # nothing of the run was begun
+
     def test_a_refused_load_test_leaves_no_copy_of_the_map(self):
         from rustmapgen import generate
         folder = paths.data('maps', 'test-map-2')
@@ -1691,6 +2056,693 @@ class SafetyTest(Isolated):
             self.assertEqual(status(host), 200, host)
         for host in ('evil.example:5350', 'evil.example'):
             self.assertEqual(status(host), 403, host)
+
+
+POWERLINE = 'assets/bundled/prefabs/autospawn/decor/powerline/powerline_a.prefab'
+
+
+def _three_d_map(path):
+    """A small map with the Outpost and a power line pylon on it, and the prefab table that names them."""
+    _write(path, _world(1000, [('Monument', mapfile.prefab_id(MONUMENT), (100.0, 5.0, -200.0), (0.0, 90.0, 0.0)),
+                               ('Decor', mapfile.prefab_id(POWERLINE), (-50.0, 8.0, 30.0), (0.0, 0.0, 0.0))], res=65))
+    os.makedirs(os.path.dirname(library.prefab_table()), exist_ok=True)
+    with open(library.prefab_table(), 'w') as handle:
+        json.dump({str(mapfile.prefab_id(p)): p for p in (MONUMENT, POWERLINE)}, handle)
+
+
+class ThreeDTest(Isolated):
+    """The 3D view: what a map gives it, the models' files, and what the panel serves."""
+
+    def test_a_map_gives_the_3d_view_its_ground_monuments_and_scenery(self):
+        from rustmapgen import bake3d
+        _three_d_map(paths.data('m.map'))
+        out = paths.data('m3d')
+        meta = bake3d.bake(paths.data('m.map'), out, seed=7)
+        self.assertEqual(sorted(os.listdir(out)), sorted(bake3d.FILES))
+        self.assertEqual((meta['size'], meta['samples']), (1000.0, 65))
+        with Image.open(os.path.join(out, '3d_heights.png')) as image:
+            self.assertEqual(image.size, (65, 65))
+        # Positions in viewer space: the game's z turned over, for the models and the scenery alike.
+        self.assertEqual([(p['short'], p['p']) for p in meta['placed']], [('compound', [100.0, 5.0, 200.0])])
+        self.assertEqual([(m['label'], m['z'], m['icon']) for m in meta['monuments']], [('Outpost', -200.0, None)])
+        self.assertEqual(meta['scenery_kinds'], ['decor/powerline/powerline_a'])
+        with open(os.path.join(out, '3d_scenery.bin'), 'rb') as handle:
+            row = struct.unpack('<HH3f4f3f', handle.read())
+        self.assertEqual((row[0], row[2:5]), (0, (-50.0, 8.0, -30.0)))
+        self.assertNotIn('models', meta)                 # the panel names the models when it serves the file
+        self.assertEqual(bake3d.bake(paths.data('m.map'), paths.data('again'), seed=7)['trees'], meta['trees'])
+
+    def test_a_river_surface_is_never_blended_with_no_water(self):
+        from rustmapgen import bake3d
+
+        class World:
+            size = 2.0
+
+            @staticmethod
+            def layer(name):
+                grid = np.zeros((3, 3), dtype='<i2')
+                grid[1, 1] = 16383
+                return grid
+        at = bake3d.surface(World, np.array([0.0, 0.5, -1.0]), np.array([0.0, 0.0, -1.0]))
+        held = mapfile.TERRAIN_BASE + 16383 * bake3d.TO_METRES
+        self.assertAlmostEqual(at[0], held, places=3)
+        self.assertAlmostEqual(at[1], held, places=3)   # half way to a cell without water: the water's own height
+        self.assertTrue(np.isnan(at[2]))
+
+    def test_models_are_written_as_the_page_reads_them(self):
+        from rustmapgen import models3d
+        cube = (np.array([[x, y, z] for x in (0, 2) for y in (0, 3) for z in (0, -4)], dtype=np.float64),
+                np.full((8, 3), 0.5, dtype=np.float32),
+                np.array([[0, 1, 3], [0, 3, 2], [4, 6, 7], [4, 7, 5], [0, 4, 5], [0, 5, 1], [2, 3, 7], [2, 7, 6]], dtype=np.int64))
+        target = paths.data('models')
+        os.makedirs(target)
+        near = models3d.thinned(cube, 100)
+        far = models3d.thinned(cube, 4)
+        self.assertLessEqual(len(far[2]), 4)
+        box, listed = models3d.write(target, 'decor__thing', [('near', near), ('far', far)])
+        self.assertEqual(box, [0.0, 0.0, -4.0, 2.0, 3.0, 0.0])
+        self.assertEqual([level['file'] for level in listed], ['decor__thing.near.bin.gz', 'decor__thing.far.bin.gz'])
+        with open(os.path.join(target, 'decor__thing.near.bin.gz'), 'rb') as handle:
+            blob = gzip.decompress(handle.read())
+        length = struct.unpack_from('<I', blob)[0]
+        header = json.loads(blob[4:4 + length])
+        self.assertEqual(header['levels'][0], {'name': 'near', 'vertices': 8, 'triangles': 8, 'index': 2})
+        with open(os.path.join(target, 'index.json'), 'w') as handle:
+            json.dump({'decor/thing': {'levels': listed, 'box': box}}, handle)
+        models3d.bundle(target)
+        with open(os.path.join(target, 'far.bin.gz'), 'rb') as handle:
+            blob = gzip.decompress(handle.read())
+        length = struct.unpack_from('<I', blob)[0]
+        offset, size = json.loads(blob[4:4 + length])['decor/thing']
+        with open(os.path.join(target, 'decor__thing.far.bin.gz'), 'rb') as handle:
+            self.assertEqual(blob[4 + length + offset:4 + length + offset + size], gzip.decompress(handle.read()))
+
+    def test_the_models_are_made_again_for_another_game_or_another_code(self):
+        from rustmapgen import models3d
+        self.assertIsNone(models3d.version())            # no game: nothing to make them from
+        manifest = paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"buildid"\t\t"25902425"\n}\n')
+        made = models3d.version()
+        self.assertRegex(made, r'^25902425-[0-9a-f]{10}$')
+        self.assertTrue(models3d.VERSION.match(made))
+        self.assertIsNone(models3d.ready())
+        os.makedirs(models3d.folder(made))
+        with open(os.path.join(models3d.folder(made), 'done.json'), 'w') as handle:
+            handle.write('{}')
+        self.assertEqual(models3d.ready(), made)
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"buildid"\t\t"26000000"\n}\n')
+        self.assertIsNone(models3d.ready())               # a new build of the game: made again
+
+    def test_a_game_whose_files_give_few_monument_models_is_a_failure_tried_again(self):
+        from unittest import mock
+        from rustmapgen import gamefiles, models3d
+        manifest = paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"buildid"\t\t"25902425"\n}\n')
+        open(paths.game(runner.MARKER), 'w').close()      # a game folder RustMapGen made
+        todo = [('monuments', 'compound', []), ('monuments', 'airfield_1', []), ('scenery', 'rock', [])]
+        with mock.patch.object(models3d, 'ensure_packages'), mock.patch.object(gamefiles, 'Game'), \
+                mock.patch.object(models3d, 'jobs', return_value=todo):
+            with self.assertRaisesRegex(RuntimeError, 'a model for 0 of 2 monuments'):
+                models3d.build(say=lambda *a, **k: None)
+        self.assertIsNone(models3d.ready())                # not "made": the view would have no monuments
+        self.assertIn('0 of 2 monuments', models3d.failed())
+        self.assertEqual(server.three_d_state()['ready'], False)
+
+    def test_the_models_are_made_by_themselves_and_a_failed_try_is_not_repeated(self):
+        from unittest import mock
+        from rustmapgen import models3d
+
+        class Waiting:
+            def __init__(self):
+                self.jobs = []
+
+            def busy(self, kind):
+                return any(job['kind'] == kind for job in self.jobs)
+
+            def add(self, jobs):
+                self.jobs += jobs
+                return len(jobs)
+        queue = Waiting()
+        server.queue_models(queue)
+        self.assertEqual(queue.jobs, [])                   # no game: nothing to make them from
+        manifest = paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"buildid"\t\t"25902425"\n}\n')
+        server.queue_models(queue)
+        server.queue_models(queue)
+        self.assertEqual(queue.jobs, [{'kind': 'models-3d'}])   # once, when the panel starts without them
+        with mock.patch.object(models3d, '_build', side_effect=runner.Busy('another map is being made on this computer')):
+            with self.assertRaises(runner.Busy):
+                models3d.build()
+        self.assertIsNone(models3d.failed())               # a busy game is no failure: the models wait their turn
+        said = []
+        with mock.patch.object(models3d, 'ensure_packages', side_effect=RuntimeError('no wheel for this Python')):
+            models3d.after_game_change(say=lambda *line, **_: said.append(line[0]))
+        self.assertIn('no wheel for this Python', said[-1])   # said, and the install or update goes on
+        self.assertEqual(models3d.failed(), 'no wheel for this Python')
+        self.assertEqual(server.three_d_state(), {'ready': False, 'game': True, 'failed': 'no wheel for this Python'})
+        queue.jobs.clear()
+        server.queue_models(queue)
+        self.assertEqual(queue.jobs, [])                   # not tried again by itself: Prepare 3D does
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"buildid"\t\t"26000000"\n}\n')
+        self.assertIsNone(models3d.failed())               # another build of the game is tried again
+        server.queue_models(queue)
+        self.assertEqual(queue.jobs, [{'kind': 'models-3d'}])
+
+    def test_the_page_loads_only_files_the_panel_serves(self):
+        folder = paths.package('page3d')
+        with open(os.path.join(folder, 'index.html'), encoding='utf-8') as handle:
+            html = handle.read()
+        mapped = json.loads(re.search(r'<script type="importmap">(.*?)</script>', html).group(1))['imports']
+        wanted = {target[len('/3d/'):] for target in mapped.values()} | {re.search(r'src="/3d/([^"]+)"', html).group(1)}
+        for name in sorted(server.PAGE3D_FILES):
+            with open(os.path.join(folder, name), encoding='utf-8') as handle:
+                for spec in re.findall(r"^import\s*[^'\"]*['\"]([^'\"]+)['\"]", handle.read(), re.M):
+                    if spec.startswith('.'):
+                        wanted.add(os.path.normpath(os.path.join(os.path.dirname(name), spec)).replace(os.sep, '/'))
+                    else:
+                        self.assertIn(spec, mapped, name)
+        self.assertEqual(wanted - server.PAGE3D_FILES, set())
+        self.assertTrue(os.path.isfile(os.path.join(folder, 'viewer', 'vendor', 'three.LICENSE')))
+
+    def test_nothing_made_from_the_game_is_in_the_code(self):
+        # The models are made on each computer from its own copy of the game, into the data folder: never shipped.
+        kept = {'.git', 'data', 'game', 'game-staging', 'steamcmd', '.venv', 'obj', 'build', '__pycache__'}
+        for base, folders, files in os.walk(ROOT):
+            folders[:] = [f for f in folders if f not in kept]
+            self.assertNotIn('3d-models', folders, base)
+            for name in files:
+                self.assertFalse(name.endswith('.bin.gz') or name.startswith('3d_'), os.path.join(base, name))
+
+class NextUpdateTest(Isolated):
+    """The next update: open once a release declares it (its forced wipe, Steam branch and what changes) until the
+    update is out, its own folder and ports, and a mod that did not load on it. "staging" in the code."""
+
+    def setUp(self):
+        super().setUp()
+        self.declaration = os.path.join(self.folder.name, 'next-update.json')
+        os.environ['RUSTMAPGEN_NEXT_UPDATE'] = self.declaration
+        self.addCleanup(os.environ.pop, 'RUSTMAPGEN_NEXT_UPDATE', None)
+
+    def declare(self, **fields):
+        body = dict({'wipe': '2026-11-05', 'branch': 'release', 'checked': 'Sun 1 Nov', 'build': '26200000',
+                     'changes': ['Monuments sit further apart.', 'Train tunnels no longer cross canyons.']}, **fields)
+        with open(self.declaration, 'w') as handle:
+            json.dump(body, handle)
+
+    def at(self, text):
+        import datetime
+        return datetime.datetime.strptime(text, '%Y-%m-%d %H:%M').replace(tzinfo=datetime.timezone.utc)
+
+    def test_nothing_is_offered_until_a_release_declares_it(self):
+        from rustmapgen import staging
+        when = self.at('2026-11-02 08:00')
+        self.assertIsNone(staging.declared(when))
+        self.assertFalse(staging.is_open(when))
+        self.assertIsNone(staging.notice(when))
+        self.assertIn('come with an update of RustMapGen', staging.refusal(when))
+        described = staging.describe(when)
+        self.assertEqual((described['open'], described['changes'], described['key']), (False, [], None))
+        # A declaration that is not whole is no declaration.
+        for broken in ({'wipe': '2026-11-06'}, {'branch': 'beta'}, {'changes': 'one line'}, {'changes': []}):
+            self.declare(**broken)
+            self.assertIsNone(staging.declared(when), broken)
+        os.environ.pop('RUSTMAPGEN_NEXT_UPDATE')
+        self.assertIsNone(staging.declared(when))      # this copy ships none
+        os.environ[staging.OVERRIDE] = '1'
+        self.addCleanup(os.environ.pop, staging.OVERRIDE, None)
+        self.assertIsNone(staging.refusal(when))       # for testing, on any day
+
+    def test_a_declaration_opens_it_until_its_forced_wipe(self):
+        from rustmapgen import staging
+        self.declare()
+        when = self.at('2026-11-01 18:00')
+        self.assertTrue(staging.is_open(when))
+        self.assertIsNone(staging.refusal(when))
+        self.assertIn("in 4 days (Thu 5 Nov). Its maps are made on Steam's release branch: the RustMapGen authors checked on Sun 1 Nov",
+                      staging.notice(when))
+        described = staging.describe(when)
+        self.assertEqual((described['branch'], described['build'], described['key'], len(described['changes'])),
+                         ('release', '26200000', '2026-11-05/Sun 1 Nov/26200000', 2))
+        self.assertEqual(staging.branch(), 'release')
+        self.assertFalse(staging.needs_word(when))                          # the declaration is enough until the day
+        self.assertTrue(staging.needs_word(self.at('2026-11-05 10:00')))    # that day Steam is asked first
+        self.assertIn('is today', staging.notice(self.at('2026-11-05 10:00')))
+        self.assertIsNone(staging.declared(self.at('2026-11-06 00:00')))    # over when the day ends
+        self.declare(branch='staging')
+        self.assertIn("Steam's staging branch", staging.notice(when))
+
+    def test_it_closes_when_steam_shows_the_update_out_on_the_wipe_day(self):
+        from rustmapgen import staging
+        self.declare()
+        self.assertIsNone(staging.released(self.at('2026-11-05 08:00')))
+        staging.remember({'public': '1000', 'release': '1150'}, self.at('2026-11-04 22:00'))
+        staging.remember({'public': '1000', 'release': '1150'}, self.at('2026-11-05 08:00'))
+        self.assertIsNone(staging.released(self.at('2026-11-05 08:05')))
+        self.assertTrue(staging.is_open(self.at('2026-11-05 08:05')))
+        self.assertIn('until the update is out', staging.notice(self.at('2026-11-05 08:05')))
+        # The release: the public branch holds the declared branch's build.
+        staging.remember({'public': '1150', 'release': '1150'}, self.at('2026-11-05 19:04'))
+        self.assertEqual(staging.released(self.at('2026-11-05 19:05'))['public'], '1150')
+        self.assertFalse(staging.is_open(self.at('2026-11-05 19:05')))
+        self.assertIn("update came out by 19:04 UTC (Steam's public build 1150)", staging.refusal(self.at('2026-11-05 19:05')))
+        self.assertIsNone(staging.released(self.at('2026-11-05 19:03')))      # what Steam said later does not count before
+        self.assertEqual(staging.describe(self.at('2026-11-05 19:05'))['released'], {'public': '1150', 'utc': '2026-11-05T19:04:00Z'})
+
+    def test_a_public_branch_set_on_the_wipe_day_is_the_release_with_nothing_heard_before(self):
+        from rustmapgen import staging
+        self.declare()
+        unix = lambda text: int(self.at(text).timestamp())     # noqa: E731
+        # A hotfix the day before is not the release.
+        staging.remember({'public': '1001', 'release': '1150', 'public_updated': unix('2026-11-04 15:00')}, self.at('2026-11-05 09:00'))
+        self.assertIsNone(staging.released(self.at('2026-11-05 09:01')))
+        self.assertTrue(staging.is_open(self.at('2026-11-05 09:01')))
+        # A first look at Steam after the release, with the release branch given a hotfix already.
+        staging.remember({'public': '1160', 'release': '1170', 'public_updated': unix('2026-11-05 19:02')}, self.at('2026-11-05 21:00'))
+        out = staging.released(self.at('2026-11-05 21:01'))
+        self.assertEqual((out['public'], out['since']), ('1160', 'at 19:02'))
+        self.assertIn('came out at 19:02 UTC', staging.refusal(self.at('2026-11-05 21:01')))
+        self.assertFalse(staging.is_open(self.at('2026-11-05 21:01')))
+        self.assertIsNone(staging.released(self.at('2026-11-05 19:01')))      # Steam's word is not believed before its time
+
+    def test_steams_answer_gives_each_branch_its_build_and_when_it_was_set(self):
+        from unittest import mock
+        from rustmapgen import game, staging
+        branch = lambda name, build, when: f'\t\t\t"{name}"\n\t\t\t{{\n\t\t\t\t"buildid"\t\t"{build}"\n\t\t\t\t"timeupdated"\t\t"{when}"\n\t\t\t}}\n'  # noqa: E731
+        answer = ('"258550"\n{\n\t"depots"\n\t{\n\t\t"258551"\n\t\t{\n\t\t\t"manifests"\n\t\t\t{\n\t\t\t\t"public"\n\t\t\t\t{\n'
+                  '\t\t\t\t\t"gid"\t\t"123"\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\t"branches"\n\t\t{\n'
+                  + branch('public', 25902425, 1791884653) + branch('release', 26104496, 1792407840)
+                  + branch('staging', 26070150, 1792469805) + '\t\t}\n\t}\n}\n')
+        with mock.patch.object(game, 'ensure_steamcmd', return_value='steamcmd'), mock.patch.object(game, '_steamcmd', return_value=(0, answer, '')):
+            found = game.steam_builds()
+        self.assertEqual(found, {'public': '25902425', 'public_updated': 1791884653, 'release': '26104496', 'release_updated': 1792407840,
+                                 'staging': '26070150', 'staging_updated': 1792469805})
+        kept = staging.seen()[-1]
+        self.assertEqual((kept['public'], kept['public_updated'], kept['release'], kept['release_updated']),
+                         ('25902425', 1791884653, '26104496', 1792407840))
+
+    def test_on_the_wipe_day_work_on_it_asks_steam_first(self):
+        from unittest import mock
+        from rustmapgen import __main__ as cli, game, staging
+        self.declare()
+        self.assertTrue(staging.needs_word(self.at('2026-11-05 10:00')))      # nothing heard
+        staging.remember({'public': '1000', 'release': '1150'}, self.at('2026-11-05 09:45'))
+        self.assertFalse(staging.needs_word(self.at('2026-11-05 10:00')))
+        self.assertTrue(staging.needs_word(self.at('2026-11-05 10:16')))
+        self.assertFalse(staging.needs_word(self.at('2026-11-04 10:16')))     # the day before: the declaration is enough
+        with mock.patch.object(staging, 'needs_word', return_value=True), \
+                mock.patch.object(game, 'steam_builds', side_effect=RuntimeError('steamcmd ended with 5')):
+            with self.assertRaises(SystemExit) as caught:
+                cli.main(['generate', '--recipe', 'small', '--game', 'next'])
+        self.assertIn('Steam did not answer', str(caught.exception.code))
+
+    def test_a_game_already_at_steams_newest_build_is_left_as_it_is(self):
+        from unittest import mock
+        from rustmapgen import game
+        runner.claim()
+        manifest = paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"StateFlags"\t\t"4"\n\t"buildid"\t\t"200"\n}\n')
+        open(runner.executable(), 'w').close()
+        quiet = lambda *a, **k: None                    # noqa: E731
+        with mock.patch.object(game, 'steam_builds', return_value={'public': '200'}), mock.patch.object(game, 'update_game') as update:
+            self.assertEqual(game.bring_to_newest('public', quiet), '200')
+            update.assert_not_called()
+        with mock.patch.object(game, 'steam_builds', return_value={'public': '201'}), mock.patch.object(game, 'update_game') as update:
+            game.bring_to_newest('public', quiet)
+            update.assert_called_once_with('public', quiet)
+
+    def test_the_next_updates_game_has_a_folder_and_ports_of_its_own(self):
+        from rustmapgen import staging
+        public = runner._command([], 'log.txt', dict(paths.DEFAULT_SETTINGS, isolate_network=False))[0]
+        saved = os.environ['RUSTMAPGEN_GAME']
+        self.addCleanup(os.environ.__setitem__, 'RUSTMAPGEN_GAME', saved)
+        self.assertFalse(staging.active())
+        staging.use()
+        self.assertTrue(staging.active())
+        self.assertEqual(paths.game(), os.path.join(self.folder.name, 'game-next'))
+        ported = runner._command([], 'log.txt', dict(paths.DEFAULT_SETTINGS, isolate_network=False))[0]
+        port = lambda argv: int(argv[argv.index('+server.port') + 1])     # noqa: E731
+        self.assertEqual(port(ported), port(public) + staging.PORT_OFFSET)
+
+    def test_a_mod_that_did_not_load_is_not_tried_again_on_that_build(self):
+        manifest = paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+        runner.claim()
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"StateFlags"\t\t"4"\n\t"buildid"\t\t"300"\n\t"UserConfig"\n\t{\n\t\t"BetaKey"\t\t"release"\n\t}\n}\n')
+        fake = os.path.join(self.folder.name, runner.MOD_FILE)
+        with open(fake, 'wb') as handle:
+            handle.write(b'the mod')
+        self.addCleanup(setattr, runner, 'mod_source', runner.mod_source)
+        runner.mod_source = lambda: fake
+        self.assertIsNone(runner.mod_broken())
+        runner._keep_mod_record(False)
+        broken = runner.mod_broken()
+        self.assertEqual((broken['build'], broken['branch']), ('300', 'release'))
+        self.assertEqual(runner.describe_game()['mod_broken']['build'], '300')
+        with open(paths.data('settings.json'), 'w') as handle:
+            json.dump({'min_free_gb': 0, 'max_temp_c': 999}, handle)
+        open(runner.executable(), 'w').close()
+        with self.assertRaisesRegex(RuntimeError, 'does not work on release build 300'):
+            runner.run(paths.data('jobs'), [], None, say=lambda *a, **k: None)
+        with open(fake, 'wb') as handle:
+            handle.write(b'a newer mod')                 # a newer RustMapGen brings another mod: it is tried
+        self.assertIsNone(runner.mod_broken())
+        runner._keep_mod_record(False)
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"StateFlags"\t\t"4"\n\t"buildid"\t\t"301"\n}\n')
+        self.assertIsNone(runner.mod_broken())            # and so is another build of the game
+
+    def test_the_command_line_keeps_its_days(self):
+        import contextlib
+        from unittest import mock
+        from rustmapgen import __main__ as cli, staging
+        with mock.patch.object(staging, 'needs_word', return_value=False), \
+                mock.patch.object(staging, 'refusal', return_value='maps for the next update are made from Sat 31 Oct'):
+            for argv in (['generate', '--recipe', 'small', '--game', 'next'], ['update', '--game', 'next'],
+                         ['load-test', 'some-map', '--game', 'next'], ['install', '--game', 'next']):
+                with self.assertRaises(SystemExit) as caught:
+                    cli.main(argv)
+                self.assertIn('Sat 31 Oct', str(caught.exception.code), argv)
+        with mock.patch.object(staging, 'needs_word', return_value=False), mock.patch.object(staging, 'refusal', return_value=None):
+            with self.assertRaises(SystemExit) as caught:
+                cli.main(['generate', '--recipe', 'small', '--game', 'next'])
+            self.assertIn('run "update --game next" first', str(caught.exception.code))
+        shown = io.StringIO()
+        with contextlib.redirect_stdout(shown), self.assertRaises(SystemExit):
+            cli.main(['--help'])
+        self.assertIn('remove-next', shown.getvalue())
+        self.assertNotIn('staging', shown.getvalue())
+
+    def test_the_next_updates_game_is_never_the_public_one_whatever_the_names(self):
+        from rustmapgen import __main__ as cli, game, staging
+        self.addCleanup(setattr, staging, '_public', None)
+        public = paths.game()
+        runner.claim()                                  # the public game: a folder RustMapGen made, with its marker
+        keep = os.path.join(public, 'RustDedicated')
+        open(keep, 'w').close()
+        alias = os.path.join(self.folder.name, 'alias')
+        os.symlink(public, alias)
+        for named in (alias, os.path.join(public, 'inside'), self.folder.name):    # the same folder, one inside, one around
+            os.environ['RUSTMAPGEN_GAME_NEXT'] = named
+            for argv in (['remove-next'], ['generate', '--recipe', 'small', '--game', 'next'], ['update', '--game', 'next']):
+                with self.assertRaises(SystemExit) as caught:
+                    cli.main(argv)
+                self.assertIn('would share a folder', str(caught.exception.code), (named, argv))
+        self.assertTrue(os.path.exists(keep))
+        self.assertFalse(staging.same_place(public, os.path.join(self.folder.name, 'game-next')))
+        # Where it is deleted, checked again: reached with the public game behind the name, nothing of it goes.
+        staging._public = public
+        os.environ['RUSTMAPGEN_GAME_NEXT'] = os.environ['RUSTMAPGEN_GAME'] = alias
+        with self.assertRaisesRegex(RuntimeError, 'not only the next update'):
+            game.remove_staging(say=lambda *a, **k: None)
+        self.assertTrue(os.path.exists(keep))
+
+    def test_a_relative_folder_setting_is_made_whole_for_the_jobs_the_panel_starts(self):
+        script = 'import os; from rustmapgen import paths; print(os.environ["RUSTMAPGEN_GAME_NEXT"])'
+        out = subprocess.run([sys.executable, '-c', script], cwd=self.folder.name, capture_output=True, text=True,
+                             env=dict(os.environ, RUSTMAPGEN_GAME_NEXT='next-here', PYTHONPATH=ROOT))
+        self.assertEqual(out.stdout.strip(), os.path.join(os.path.abspath(self.folder.name), 'next-here'), out.stderr)
+
+    def test_each_job_on_the_next_update_starts_from_steams_newest_build_or_not_at_all(self):
+        from unittest import mock
+        from rustmapgen import __main__ as cli, game, generate as make, staging
+        self.addCleanup(setattr, staging, '_public', None)
+        saved = os.environ['RUSTMAPGEN_GAME']
+        self.addCleanup(os.environ.__setitem__, 'RUSTMAPGEN_GAME', saved)
+        self.declare()
+        done = []
+        # A map of the next update load tested on the public game: the public game is brought to Steam's newest first.
+        name = 'small-2000-4242-20261021-224813-b6bf9d'
+        os.makedirs(paths.data('maps', name))
+        with open(paths.data('maps', name, 'map.json'), 'w') as handle:
+            json.dump({'name': name, 'run': {'game_branch': 'release'}}, handle)
+        runner.claim()
+        with mock.patch.object(game, 'bring_to_newest', side_effect=lambda branch, *a, **k: done.append(('newest', branch))), \
+                mock.patch.object(make, 'load_test', side_effect=lambda *a, **k: done.append('load test')):
+            cli.main(['load-test', name])
+        self.assertEqual(done, [('newest', 'public'), 'load test'])
+        # On the next update's game, before each map and each load test; when that fails, nothing is made.
+        os.makedirs(staging.folder())
+        open(os.path.join(staging.folder(), runner.MARKER), 'w').close()
+        open(runner.executable(staging.folder()), 'w').close()
+        done.clear()
+        with mock.patch.object(staging, 'needs_word', return_value=False), \
+                mock.patch.object(game, 'bring_to_newest', side_effect=lambda branch, *a, **k: done.append(('newest', branch))), \
+                mock.patch.object(make, 'generate', side_effect=lambda *a, **k: done.append('map')):
+            cli.main(['generate', '--recipe', 'small', '--game', 'next', '--count', '2'])
+        self.assertEqual(done, [('newest', 'release'), 'map', ('newest', 'release'), 'map'])
+        os.environ['RUSTMAPGEN_GAME'] = saved           # each command is a process of its own: this one switched to that game
+        done.clear()
+        with mock.patch.object(staging, 'needs_word', return_value=False), \
+                mock.patch.object(game, 'bring_to_newest', side_effect=RuntimeError('steamcmd did not install the game')), \
+                mock.patch.object(make, 'generate', side_effect=lambda *a, **k: done.append('map')), \
+                mock.patch.object(make, 'load_test', side_effect=lambda *a, **k: done.append('load test')):
+            with self.assertRaises(SystemExit) as caught:
+                cli.main(['generate', '--recipe', 'small', '--game', 'next'])
+            self.assertIn('1 of 1 maps were not made', str(caught.exception.code))
+            os.environ['RUSTMAPGEN_GAME'] = saved
+            with self.assertRaisesRegex(RuntimeError, 'did not install'):
+                cli.main(['load-test', name, '--game', 'next'])
+            os.environ['RUSTMAPGEN_GAME'] = saved
+        self.assertEqual(done, [])
+
+    def test_a_batch_on_the_next_update_stops_when_it_closes(self):
+        from unittest import mock
+        from rustmapgen import __main__ as cli, game, generate as make, staging
+        self.addCleanup(setattr, staging, '_public', None)
+        saved = os.environ['RUSTMAPGEN_GAME']
+        self.addCleanup(os.environ.__setitem__, 'RUSTMAPGEN_GAME', saved)
+        self.declare()
+        os.makedirs(staging.folder())
+        open(os.path.join(staging.folder(), runner.MARKER), 'w').close()
+        open(runner.executable(staging.folder()), 'w').close()
+        done = []
+        closed = iter([None, None, None, None, "the forced wipe's update came out at 17:02 UTC"])
+        with mock.patch.object(staging, 'needs_word', return_value=False), \
+                mock.patch.object(staging, 'refusal', side_effect=lambda *a, **k: next(closed)), \
+                mock.patch.object(game, 'bring_to_newest', side_effect=lambda branch, *a, **k: done.append('newest')), \
+                mock.patch.object(make, 'generate', side_effect=lambda *a, **k: done.append('map')):
+            with self.assertRaises(SystemExit) as caught:
+                cli.main(['generate', '--recipe', 'small', '--game', 'next', '--count', '3'])
+        self.assertEqual(done, ['newest', 'map', 'newest', 'map'])       # the third map is not started
+        self.assertIn('1 of 3 maps were not made', str(caught.exception.code))
+        # The refresh itself can learn that the update is out (or take the day past its end): asked again after it.
+        os.environ['RUSTMAPGEN_GAME'] = saved           # each command is a process of its own
+        done.clear()
+        closed = iter([None, "the forced wipe's update came out at 17:02 UTC"])
+        with mock.patch.object(staging, 'needs_word', return_value=False), \
+                mock.patch.object(staging, 'refusal', side_effect=lambda *a, **k: next(closed)), \
+                mock.patch.object(game, 'bring_to_newest', side_effect=lambda branch, *a, **k: done.append('newest')), \
+                mock.patch.object(make, 'generate', side_effect=lambda *a, **k: done.append('map')):
+            with self.assertRaises(SystemExit) as caught:
+                cli.main(['generate', '--recipe', 'small', '--game', 'next'])
+        self.assertEqual(done, ['newest'])
+        self.assertIn('1 of 1 maps were not made', str(caught.exception.code))
+
+    def test_the_two_release_tests_agree_and_a_damaged_or_future_answer_decides_nothing(self):
+        from unittest import mock
+        from rustmapgen import game, staging
+        self.declare()
+        unix = lambda text: int(self.at(text).timestamp())     # noqa: E731
+        runner.claim()
+        manifest = paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, 'w') as handle:
+            handle.write(f'"AppState"\n{{\n\t"StateFlags"\t\t"4"\n\t"buildid"\t\t"100"\n\t"LastUpdated"\t\t"{unix("2026-10-20 12:00")}"\n}}\n')
+        quiet = lambda *a, **k: None                    # noqa: E731
+        # Steam's answer without a time for the public branch, holding the release branch's build that day: out for both.
+        staging.remember({'public': '200', 'release': '200'}, self.at('2026-11-05 19:58'))
+        self.assertTrue(staging.released(self.at('2026-11-05 20:00')))
+        with mock.patch.object(game, 'update_game', return_value='200') as update:
+            game.catch_up(quiet, self.at('2026-11-05 20:00'))
+            update.assert_called_once_with('public', quiet)
+        # A public branch said to be set later than now is not believed.
+        os.unlink(paths.data(staging.SEEN))
+        os.environ.pop('RUSTMAPGEN_NEXT_UPDATE')
+        staging.remember({'public': '200', 'public_updated': unix('2026-11-05 21:00')}, self.at('2026-11-05 19:58'))
+        with mock.patch.object(game, 'update_game') as update:
+            game.catch_up(quiet, self.at('2026-11-05 20:00'))
+            update.assert_not_called()
+        # An answer stamped later than now (a clock set back) is not fresh, and a damaged line is left out.
+        os.environ['RUSTMAPGEN_NEXT_UPDATE'] = self.declaration
+        self.assertTrue(staging.needs_word(self.at('2026-11-05 19:50')))
+        with open(paths.data(staging.SEEN)) as handle:
+            rows = json.load(handle)
+        rows.insert(0, {'utc': 'yesterday', 'public': '1'})
+        with open(paths.data(staging.SEEN), 'w') as handle:
+            json.dump(rows, handle)
+        self.assertEqual([row['utc'] for row in staging.seen()], ['2026-11-05T19:58:00Z'])
+        self.assertIsNone(staging.released(self.at('2026-11-05 20:00')))
+
+    def test_an_install_ends_with_lines_a_person_reads(self):
+        import contextlib
+        from unittest import mock
+        from rustmapgen import __main__ as cli, game, models3d
+        record = {'game': '/x/game', 'installed': True, 'build': '25902425', 'branch': 'public', 'data': '/x/data', 'mod_broken': None,
+                  'mod_used': 'the one that came with the code, for game build 25902425 (/x/mod/prebuilt/RustMapGen.dll)'}
+        shown = io.StringIO()
+        with mock.patch.object(game, 'install', return_value=record), mock.patch.object(models3d, 'after_game_change'), \
+                contextlib.redirect_stdout(shown):
+            cli.main(['install'])
+        self.assertEqual(shown.getvalue().strip().splitlines(), [
+            'In place:', '  game: build 25902425, public branch, in /x/game',
+            '  mod: the one that came with the code, for game build 25902425', '  maps and settings: /x/data'])
+
+    def test_steam_without_the_branch_stops_the_work_and_a_day_gone_by_says_so(self):
+        from unittest import mock
+        from rustmapgen import game, staging
+        quiet = lambda *a, **k: None                    # noqa: E731
+        with mock.patch.object(game, 'steam_builds', return_value={'public': '200'}), \
+                mock.patch.object(game, 'update_game') as update:
+            with self.assertRaisesRegex(RuntimeError, 'Steam has no release branch'):
+                game.bring_to_newest('release', quiet)
+            update.assert_not_called()                 # no steamcmd run that could only fail and leave the game "updating"
+        self.declare()
+        self.assertIn('the forced wipe of Thu 5 Nov is over', staging.refusal(self.at('2026-11-06 09:00')))
+        os.environ.pop('RUSTMAPGEN_NEXT_UPDATE')
+        self.assertIn('come with an update of RustMapGen', staging.refusal(self.at('2026-11-06 09:00')))
+
+    def test_a_load_test_and_the_update_before_it_go_in_together_or_not_at_all(self):
+        from unittest import mock
+        queue = server.Queue()
+        queue.process = mock.Mock(poll=lambda: None)    # a job "running": nothing more is started meanwhile
+        with queue.lock:
+            queue.jobs = [{'kind': 'models-3d'}] * (server.QUEUE_LIMIT - 1)
+        self.assertEqual(queue.add([{'kind': 'update'}, {'kind': 'load-test'}], whole=True), 0)
+        self.assertEqual(len(queue.jobs), server.QUEUE_LIMIT - 1)
+        self.assertEqual(queue.add([{'kind': 'update'}, {'kind': 'generate'}]), 1)     # a batch takes what fits
+
+    def test_a_fresh_answer_of_steam_is_used_again_before_the_next_job(self):
+        from unittest import mock
+        from rustmapgen import game, staging
+        runner.claim()
+        manifest = paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, 'w') as handle:
+            handle.write('"AppState"\n{\n\t"StateFlags"\t\t"4"\n\t"buildid"\t\t"300"\n\t"UserConfig"\n\t{\n\t\t"BetaKey"\t\t"release"\n\t}\n}\n')
+        open(runner.executable(), 'w').close()
+        staging.remember({'public': '200', 'release': '300'})
+        quiet = lambda *a, **k: None                    # noqa: E731
+        with mock.patch.object(game, 'steam_builds') as asked, mock.patch.object(game, 'update_game') as update:
+            self.assertEqual(game.bring_to_newest('release', quiet), '300')
+            asked.assert_not_called()
+            update.assert_not_called()
+
+    def test_a_job_of_the_next_update_runs_its_command_on_its_game(self):
+        self.assertEqual(server.job_arguments({'kind': 'update', 'game': 'staging'}), ['update', '--game', 'next'])
+        self.assertEqual(server.job_arguments({'kind': 'update'}), ['update'])
+        self.assertEqual(server.job_arguments({'kind': 'update', 'forced_wipe': True}), ['update', '--forced-wipe'])
+        self.assertEqual(server.job_arguments({'kind': 'generate', 'recipe_file': 'r.json', 'game': 'staging', 'seed': 7}),
+                         ['generate', '--recipe', 'r.json', '--note', '', '--game', 'next', '--seed', '7'])
+        self.assertEqual(server.job_arguments({'kind': 'load-test', 'name': 'm', 'game': 'public'}), ['load-test', 'm'])
+        self.assertEqual(server.job_arguments({'kind': 'load-test', 'name': 'm', 'game': 'staging'}), ['load-test', 'm', '--game', 'next'])
+        self.assertEqual(server.job_arguments({'kind': 'remove-staging'}), ['remove-next'])
+
+class ForcedWipeTest(Isolated):
+    """From the forced wipe on, maps are made on its update: a game last updated before that day is brought to it first,
+    once it is out, and a mid-month update is never fetched so."""
+
+    def at(self, text):
+        import datetime
+        return datetime.datetime.strptime(text, '%Y-%m-%d %H:%M').replace(tzinfo=datetime.timezone.utc)
+
+    def unix(self, text):
+        return int(self.at(text).timestamp())
+
+    def game_at(self, build, updated):
+        runner.claim()
+        manifest = paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+        os.makedirs(os.path.dirname(manifest), exist_ok=True)
+        with open(manifest, 'w') as handle:
+            handle.write(f'"AppState"\n{{\n\t"StateFlags"\t\t"4"\n\t"buildid"\t\t"{build}"\n'
+                         f'\t"LastUpdated"\t\t"{self.unix(updated)}"\n}}\n')
+
+    def test_the_latest_forced_wipe_is_the_first_thursday_once_it_has_come(self):
+        from rustmapgen import staging
+        self.assertEqual(str(staging.last_wipe(self.at('2026-11-05 00:00'))), '2026-11-05')
+        self.assertEqual(str(staging.last_wipe(self.at('2026-11-04 23:59'))), '2026-10-01')
+        self.assertEqual(str(staging.last_wipe(self.at('2027-01-06 12:00'))), '2026-12-03')
+        self.assertEqual(str(staging.last_wipe(self.at('2027-01-07 12:00'))), '2027-01-07')
+        self.assertEqual(staging.wipe_start(self.at('2026-11-20 08:00')), self.at('2026-11-05 00:00'))
+
+    def test_a_game_older_than_the_forced_wipe_is_brought_to_its_update_once_it_is_out(self):
+        from unittest import mock
+        from rustmapgen import game
+        said = []
+        say = lambda text, **k: said.append(text)       # noqa: E731
+        self.assertFalse(game.behind_forced_wipe(self.at('2026-11-05 09:00')))     # no game: nothing to bring
+        self.game_at('1000', '2026-10-20 12:00')
+        self.assertEqual(runner.game_updated(), self.unix('2026-10-20 12:00'))
+        self.assertFalse(game.behind_forced_wipe(self.at('2026-11-04 23:00')))     # before the wipe it is the game
+        self.assertTrue(game.behind_forced_wipe(self.at('2026-11-05 09:00')))
+        # The morning of the wipe: Steam's public build is still a mid-month one, and it is not fetched.
+        with mock.patch.object(game, 'steam_builds', return_value={'public': '1001', 'public_updated': self.unix('2026-10-22 17:00')}), \
+                mock.patch.object(game, 'update_game') as update:
+            self.assertEqual(game.catch_up(say, self.at('2026-11-05 09:00')), '1000')
+            update.assert_not_called()
+        self.assertIn('not out yet', said[-1])
+        # Steam cannot be asked: the game stays as it is, and nothing marks it as being updated.
+        with mock.patch.object(game, 'steam_builds', side_effect=RuntimeError('steamcmd ended with 5')), \
+                mock.patch.object(game, 'update_game') as update:
+            self.assertEqual(game.catch_up(say, self.at('2026-11-05 18:00')), '1000')
+            update.assert_not_called()
+        self.assertIn('could not be asked', said[-1])
+        self.assertFalse(os.path.exists(paths.game(runner.UPDATING)))
+        # Out: Steam's public branch was set on the day of the wipe.
+        with mock.patch.object(game, 'steam_builds', return_value={'public': '1100', 'public_updated': self.unix('2026-11-05 17:02')}), \
+                mock.patch.object(game, 'update_game', return_value='1100') as update:
+            self.assertEqual(game.catch_up(say, self.at('2026-11-05 18:00')), '1100')
+            update.assert_called_once_with('public', say)
+        self.assertIn('brought build 1100', said[-1])
+        # Updated since that day began: Steam is not even asked, so a hotfix later in the month is left to the person.
+        self.game_at('1100', '2026-11-05 18:01')
+        with mock.patch.object(game, 'steam_builds') as asked, mock.patch.object(game, 'update_game') as update:
+            self.assertEqual(game.catch_up(say, self.at('2026-11-20 10:00')), '1100')
+            asked.assert_not_called()
+            update.assert_not_called()
+
+    def test_a_fresh_answer_of_steam_is_used_again(self):
+        from unittest import mock
+        from rustmapgen import game, staging
+        quiet = lambda *a, **k: None                    # noqa: E731
+        self.game_at('1000', '2026-10-20 12:00')
+        staging.remember({'public': '1000', 'public_updated': self.unix('2026-10-01 17:00')}, self.at('2026-11-05 09:50'))
+        with mock.patch.object(game, 'steam_builds') as asked, mock.patch.object(game, 'update_game') as update:
+            game.catch_up(quiet, self.at('2026-11-05 10:00'))
+            asked.assert_not_called()
+            update.assert_not_called()
+        with mock.patch.object(game, 'steam_builds', return_value={'public': '1000', 'public_updated': self.unix('2026-10-01 17:00')}) as asked:
+            game.catch_up(quiet, self.at('2026-11-05 10:30'))
+            asked.assert_called_once()
+
+    def test_the_command_line_catches_up_before_its_maps(self):
+        from unittest import mock
+        from rustmapgen import __main__ as cli, game, generate as make, models3d
+        order = []
+        with mock.patch.object(game, 'behind_forced_wipe', return_value=True), \
+                mock.patch.object(game, 'catch_up', side_effect=lambda *a, **k: order.append('catch up')), \
+                mock.patch.object(make, 'generate', side_effect=lambda *a, **k: order.append('map')):
+            cli.main(['generate', '--recipe', 'small', '--count', '2'])
+        self.assertEqual(order, ['catch up', 'map', 'catch up', 'map'])
+        with mock.patch.object(game, 'behind_forced_wipe', return_value=False), mock.patch.object(game, 'catch_up') as caught_up, \
+                mock.patch.object(make, 'generate'):
+            cli.main(['generate', '--recipe', 'small'])
+            caught_up.assert_not_called()
+        with mock.patch.object(game, 'catch_up') as caught_up, mock.patch.object(game, 'bring_to_newest') as newest, \
+                mock.patch.object(models3d, 'after_game_change'):
+            cli.main(['update', '--forced-wipe'])
+            caught_up.assert_called_once_with()
+            newest.assert_not_called()
 
 
 if __name__ == '__main__':

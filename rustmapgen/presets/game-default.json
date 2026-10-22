@@ -2,7 +2,7 @@
   "name": "game-default",
   "title": "Game default",
   "size": 4250,
-  "source": "Everything as the game decides by itself, nothing changed: the map to compare the others with. From 4250 the game places every monument and both rings by itself (the road ring from 4000, the rail ring from 4250); canyons come from 4500 and the large mountain from 5000.",
+  "source": "Nothing changed: the map the game makes by itself, to compare the others with. From 4250 the game places every monument and both rings itself.",
   "world": {
     "MainRoads": true,
     "SideRoads": true,

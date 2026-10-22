@@ -61,7 +61,7 @@ async function load(keep, quiet) {
     for (const id of ['views', 'glance', 'd-tabs', 'panels']) $(id).replaceChildren();
     return;
   }
-  const wanted = keep || decodeURIComponent(location.hash.slice(1));
+  const wanted = keep || decodeURIComponent(location.hash.slice(1)) || (S.current !== LIVE ? S.current : '');
   const first = S.maps.find((m) => m.name === wanted) || S.maps[0];
   await show(first.name);
 }
@@ -85,7 +85,7 @@ function renderList() {
     side.append(el('button', { class: 'item' + (card.name === S.current ? ' on' : ''), 'data-name': card.name, onclick: () => { showMaps(); show(card.name); } },
       el('img', { src: `/files/${card.name}/thumb.webp`, alt: '', loading: 'lazy', width: 44, height: 44 }),
       el('span', {}, el('span', { class: 't', text: card.title.split(' · seed')[0] }),
-        el('span', { class: 's', text: `${card.size} · seed ${card.seed} · ${fmt(card.rail_km, 1)} km rails` })),
+        el('span', { class: 's', text: `${(card.game_branch || 'public') !== 'public' ? 'next update · ' : ''}${card.size} · seed ${card.seed} · ${fmt(card.rail_km, 1)} km rails` })),
       checkTag(card)));
     pick.append(el('option', { value: card.name, text: `${card.title} (${card.size})` }));
   }
@@ -98,12 +98,14 @@ function renderInstall() {
   const i = S.install;
   if (!i) return;
   const problems = [];
-  if (!i.installed) problems.push(`No game at ${i.game}. Run the installer (install.sh or install.ps1), or "python -m rustmapgen install".`);
-  else if (i.update_unfinished) problems.push('The last update of the game did not finish: update it again (Updates, at the top).');
-  else if (!i.mod) problems.push('The mod is not in the game yet: it is put there when the first map is made.');
+  if (!i.installed) problems.push(`No game at ${i.game}: run the installer (install.cmd on Windows, install.sh on Linux).`);
+  else if (i.update_unfinished) problems.push('The last game update did not finish: run it again (Updates, at the top).');
+  if (i.update_pending) problems.push(`The update to RustMapGen ${i.update_pending} did not finish; no map is made until it is (Updates, at the top, then Finish).`);
+  else if (!i.mod) problems.push('The mod goes into the game with the first map.');
   if (i.oxide) problems.push('The game folder has Oxide in it: the generator needs the plain game, in a folder of its own.');
+  if (i.mod_broken) problems.push(`The mod does not work on game build ${i.mod_broken.build} yet: check for a newer RustMapGen (Updates, at the top).`);
   box.hidden = !problems.length && !!i.installed;
-  box.className = 'panel install' + (problems.length && (!i.installed || i.oxide || i.update_unfinished) ? ' bad' : '');
+  box.className = 'panel install' + (problems.length && (!i.installed || i.oxide || i.update_unfinished || i.update_pending || i.mod_broken) ? ' bad' : '');
   fill(box,
     el('span', {}, 'Game ', el('b', { text: i.installed ? `build ${i.build || '?'}` : 'not installed' })),
     el('span', {}, 'Free memory ', el('b', { text: i.free_gb != null ? `${fmt(i.free_gb, 1)} GB` : '–' })),
@@ -117,16 +119,26 @@ async function entry(name) {
   return S.cache.get(name);
 }
 
+// The address says what is shown, so that a reload or a link opens it again: New Map has no #, a map its name,
+// the map being made #making.
+function address() {
+  const hash = S.tab !== 'maps' || !S.current ? '' : S.current === LIVE ? '#making' : '#' + encodeURIComponent(S.current);
+  if (location.hash !== hash) history.replaceState(null, '', location.pathname + location.search + hash);
+}
+
 async function show(name) {
   S.current = name;
-  history.replaceState(null, '', '#' + encodeURIComponent(name));
+  address();
   for (const item of document.querySelectorAll('.item')) item.classList.toggle('on', item.dataset.name === name);
   renderLive();
   $('pick').value = name;
   const main = await entry(name);
   if (S.current !== name) return;
   if (S.compare === name) S.compare = '';
-  const other = S.compare ? await entry(S.compare).catch(() => null) : null;
+  const compare = S.compare;
+  const other = compare ? await entry(compare).catch(() => null) : null;
+  // Another map or comparison was chosen meanwhile: its own show() draws it.
+  if (S.current !== name || S.compare !== compare) return;
   renderHead(main);
   renderGlance(main);
   renderViews(main, other);
@@ -143,11 +155,57 @@ async function removeMap(map) {
   } catch (error) { alert(error.message); }
 }
 
-async function loadTestMap(map) {
+// Maps of the next update (made before the forced wipe on the Steam branch a RustMapGen update declared, or on staging
+// by an earlier version): which game they are tested on, and how its game stands now. "staging" in the code.
+const isStaging = (map) => ((map.run || {}).game_branch || 'public') !== 'public';
+const stagingOpen = () => !!(S.status && S.status.staging && S.status.staging.open);
+const stagingGame = () => (S.install && S.install.staging) || {};
+// The forced wipe a map of the next update was made for (its record keeps the declaration: '<wipe>/<checked>/<build>'),
+// against the one open now: an October map is not November's. A map made before such records counts as the open one.
+const wipeOf = (key) => (key || '').split('/')[0] || null;
+const sameWipe = (map) => {
+  const mine = wipeOf((map.run || {}).next_update), now = wipeOf(((S.status && S.status.staging) || {}).key);
+  return !mine || !now || mine === now;
+};
+// A map of the next update is tested on its game while that update is open, and on the released (public) game after it.
+const testGame = (map) => (isStaging(map) && stagingOpen() && sameWipe(map) && stagingGame().installed ? 'staging' : 'public');
+// A test on the released game: on the public game, last updated on or after the day of the map's own forced wipe (UTC),
+// as the game's record says. Not a build number: a staging build is often above the one released, and a hotfix before the
+// wipe is above the release candidate. A test without that record, or a map without its wipe, does not count.
+const releasedTest = (map, test) => {
+  const wipe = wipeOf((map.run || {}).next_update);
+  return !!test && (test.game_branch || 'public') === 'public' && !!wipe && !!test.game_updated
+    && test.game_updated * 1000 >= Date.parse(`${wipe}T00:00:00Z`);
+};
+
+async function loadTestMap(map, game) {
   try {
-    const answer = await api('/api/load-test', { method: 'POST', headers: SEND, body: JSON.stringify({ name: map.name }) });
+    const answer = await api('/api/load-test', { method: 'POST', headers: SEND, body: JSON.stringify({ name: map.name, game: game || testGame(map) }) });
     renderStatus(answer.generator);
   } catch (error) { alert(error.message); }
+}
+
+async function prepare3D() {
+  try {
+    const answer = await api('/api/models-3d', { method: 'POST', headers: SEND, body: '{}' });
+    renderStatus(answer.generator);
+    if (S.current && S.current !== LIVE) show(S.current);
+  } catch (error) { alert(error.message); }
+}
+
+// The 3D view opens in a tab of its own. Its monuments and rocks are made once for each build of the game, by themselves
+// after an install or an update; Prepare 3D makes them when that did not happen or failed.
+function threeD(map) {
+  const state = (S.status && S.status.three_d) || {};
+  const open = el('a', { class: 'btn view3d', href: '/3d/open?name=' + encodeURIComponent(map.name) + '&for=' + encodeURIComponent(map.title.split(' · seed')[0]),
+    target: '_blank', rel: 'noopener', 'data-testid': 'view-3d', text: '3D ↗', title: 'The map in 3D, in a new tab' });
+  if (state.ready || !state.game) return [open];
+  const jobs = S.status ? [S.status.job || {}, ...(S.status.queue || [])] : [];
+  const busy = jobs.some((job) => job.kind === 'models-3d');
+  const title = state.failed ? `The last try did not make them: ${state.failed}` : 'Monuments and rocks for the 3D view, made from your copy of the game: '
+    + 'a few minutes and about 2.5 GB of memory, once for each build of the game (they are made by themselves after an install or an update)';
+  return [open, el('button', { class: 'btn', 'data-testid': 'prepare-3d', text: busy ? 'Preparing 3D…' : state.failed ? 'Prepare 3D again' : 'Prepare 3D',
+    disabled: busy, title, onclick: prepare3D })];
 }
 
 function renderHead(map) {
@@ -157,10 +215,18 @@ function renderHead(map) {
   const tools = el('div', { class: 'tools' }, compare,
     el('a', { class: 'btn primary', href: `/files/${map.name}/final.map`, 'data-testid': 'download', text: 'Download .map' }),
     map.files && map.files.labels ? el('a', { class: 'btn', href: `/files/${map.name}/map_labels.webp`, target: '_blank', text: 'Picture' }) : null,
-    el('button', { class: 'btn', text: 'Test in the game', title: 'The game loads this file as a server would, then stops', onclick: () => loadTestMap(map) }),
+    // Not a way into the game: the dedicated server here loads the file as your server will, and stops.
+    el('button', { class: 'btn', 'data-testid': 'load-test', text: 'Load test',
+      title: isStaging(map) && testGame(map) === 'public'
+        ? 'The released (public) game, on this computer, loads this map of the next update the way your server will after the forced wipe, then stops. Nobody joins it.'
+        : 'The game\'s dedicated server, on this computer, loads this file the way your server will, then stops. Nobody joins it: it checks the file.',
+      onclick: () => loadTestMap(map) }),
+    ...threeD(map),
     el('button', { class: 'btn danger', text: 'Delete', onclick: () => removeMap(map) }));
   fill($('head'),
-    el('div', { class: 'title' }, el('h1', { text: map.title }), map.note ? el('span', { class: 'note', text: map.note }) : null),
+    el('div', { class: 'title' }, el('h1', { text: map.title }),
+      isStaging(map) ? el('span', { class: 'tag warn', 'data-testid': 'staging-badge', text: `Next update · build ${map.run.game_build || '?'}` }) : null,
+      map.note ? el('span', { class: 'note', text: map.note }) : null),
     tools,
     el('div', { class: 'layers' }, LAYERS.map(([key, label]) => el('button', { class: 'chip' + (S.layers[key] ? ' on' : ''), 'data-layer': key, 'aria-pressed': String(S.layers[key]),
       onclick: (e) => { S.layers[key] = !S.layers[key]; e.currentTarget.classList.toggle('on', S.layers[key]); e.currentTarget.setAttribute('aria-pressed', String(S.layers[key])); applyLayers(); } },
@@ -170,20 +236,36 @@ function renderHead(map) {
 // ---------- at a glance: beside the map, worst first ----------
 function glanceLoad(map) {
   const test = map.load_test;
-  const again = el('button', { class: 'link', text: 'test now', onclick: () => loadTestMap(map) });
-  if (!test) return ['warn', 'Not tested in the game yet', null, again];
-  if (test.state === 'stale') return ['warn', 'Changed since the game test', null, again];
-  if (test.state !== 'done' || !test.loaded) return ['bad', 'The game did not load it', (test.log_trouble || [])[0] || 'see Run below', again];
-  if (test.loaded.prefabs !== map.facts.prefabs) return ['warn', `The game read ${fmt(test.loaded.prefabs)} of ${fmt(map.facts.prefabs)} prefabs`, null, again];
+  const again = el('button', { class: 'link', text: 'load test now', onclick: () => loadTestMap(map) });
+  // After the forced wipe a map of the next update has to load on the released game: a test on last month's does not say
+  // so. A test on the released game, passed or failed, is shown as it is below.
+  if (isStaging(map) && testGame(map) === 'public' && !releasedTest(map, test)) {
+    return ['warn', 'Not load-tested on the released game yet', 'the public game your players run after the forced wipe',
+      el('button', { class: 'link', text: 'load test it there', onclick: () => loadTestMap(map, 'public') })];
+  }
+  if (!test) return ['warn', 'Not load-tested yet', null, again];
+  if (test.state === 'stale') return ['warn', 'Changed since its load test', null, again];
+  if (test.state !== 'done' || !test.loaded) return ['bad', 'The server did not load it', (test.log_trouble || [])[0] || 'see Run below', again];
+  if (test.loaded.prefabs !== map.facts.prefabs) return ['warn', `The server read ${fmt(test.loaded.prefabs)} of ${fmt(map.facts.prefabs)} prefabs`, null, again];
   const trouble = test.log_trouble || [];
-  if (trouble.length) return ['warn', `The game loads it, with ${trouble.length} problem${trouble.length === 1 ? '' : 's'} in its log`, trouble[0], again];
-  return ['ok', 'The game loads it', `nothing wrong in its log · ${fmt(test.loaded.prefabs)} prefabs, ${fmt(test.loaded.monuments)} monuments, in ${fmt(test.seconds)} s`];
+  if (trouble.length) return ['warn', `The server loads it, with ${trouble.length} problem${trouble.length === 1 ? '' : 's'} in its log`, trouble[0], again];
+  // A map of the next update tested on the public game: before the forced wipe that is last month's game, after it the released one.
+  const on = (test.game_branch || 'public') !== 'public' ? ` (the next update, build ${test.game_build})`
+    : isStaging(map) ? (releasedTest(map, test) && !(stagingOpen() && sameWipe(map)) ? ` (the released game, build ${test.game_build})`
+      : ` (public build ${test.game_build})`) : '';
+  return ['ok', 'The server loads it' + on, `clean log · ${fmt(test.loaded.prefabs)} prefabs, ${fmt(test.loaded.monuments)} monuments · ${fmt(test.seconds)} s`];
 }
 
 function renderGlance(map) {
   const failed = map.checks.filter((c) => !c.ok);
   const rows = [failed.length ? ['bad', `${failed.length} of ${map.checks.length} checks fail`, 'each one below; all of them under Checks']
     : ['ok', `All ${map.checks.length} checks pass`, 'rails, terrain, monuments, tunnels and what was asked'], glanceLoad(map)];
+  // The authors corrected the next update after this map was made: it may not match the update any more.
+  const w = (S.status && S.status.staging) || {};
+  if (isStaging(map) && stagingOpen() && sameWipe(map) && w.key && map.run.next_update && map.run.next_update !== w.key) {
+    rows.push(['warn', 'Made before the latest check of the next update', `checked again on ${w.checked}: make it again`,
+      el('button', { class: 'link', text: 'what changes', onclick: () => showChanges(true) })]);
+  }
   for (const check of failed) rows.push(['bad', check.rule, check.detail]);
   for (const m of map.merge || []) if (m.dropped) rows.push(['warn', `${m.template}: ${m.dropped} prefabs the game does not know`, 'left out of the map']);
   if (map.facts.unknown_prefabs) rows.push(['warn', `${fmt(map.facts.unknown_prefabs)} prefabs the game does not know`]);
@@ -562,13 +644,15 @@ function renderStatus(status) {
   S.status = status;
   if (status.version) S.version = status.version;
   S.statusAt = Date.now();
+  showChanges(false);
   const box = $('top-status');
   box.className = 'top-status';
   const waiting = status.queue && status.queue.length ? ` · ${status.queue.length} waiting` : '';
   if (status.running) {
     box.classList.add('busy');
     const job = status.job || {};
-    const what = job.kind === 'load-test' ? `Testing ${job.name}` : job.kind === 'update' ? 'Updating the game'
+    const what = job.kind === 'load-test' ? `Load test of ${job.name}${job.game === 'staging' ? ' on the next update' : ''}` : job.kind === 'update' ? (job.game === 'staging' ? 'Updating the next update\'s game' : job.forced_wipe ? 'The forced wipe\'s update' : 'Updating the game')
+      : job.kind === 'models-3d' ? 'Preparing the 3D models' : job.kind === 'remove-staging' ? 'Removing the next update\'s game'
       : `Making ${recipeTitle(job.recipe)}${job.seed ? ' · seed ' + job.seed : ''}`;
     box.textContent = `${what} · ${clock(status.seconds)}${status.step ? ' · ' + cleanStep(status.step) : ''}${waiting}`;
   } else if (status.last && !status.last.ok) {
@@ -582,6 +666,12 @@ function renderStatus(status) {
   if (S.current === LIVE) renderLiveView();
   queueSettled(status);
   renderUpdates();
+  renderGame();
+  // The next update opened, closed or was corrected: the map shown is judged again (its load test, its warnings).
+  const w = status.staging || {};
+  const life = JSON.stringify([!!w.open, w.key || null, (w.released || {}).public || null]);
+  if (S.life !== undefined && S.life !== life && S.current && S.current !== LIVE) show(S.current).catch(() => { /* the next poll */ });
+  S.life = life;
   clearInterval(S.ticker);
   if (status.running) S.ticker = setInterval(tick, 1000);
   // A run finished: the list is read again, and the map shown when it is new.
@@ -620,9 +710,11 @@ function liveItems(status) {
 }
 function liveTitle(item) {
   const job = item.job;
-  if (job.kind === 'update') return 'Updating the game';
-  if (job.kind === 'load-test') return 'Game test of ' + ((S.maps.find((m) => m.name === job.name) || {}).title || 'a map').split(' · seed')[0];
-  return recipeTitle(job.recipe);
+  if (job.kind === 'update') return job.game === 'staging' ? 'Updating the next update\'s game' : job.forced_wipe ? 'The forced wipe\'s update' : 'Updating the game';
+  if (job.kind === 'remove-staging') return 'Removing the next update\'s game';
+  if (job.kind === 'models-3d') return 'Preparing the 3D models';
+  if (job.kind === 'load-test') return 'Load test of ' + ((S.maps.find((m) => m.name === job.name) || {}).title || 'a map').split(' · seed')[0] + (job.game === 'staging' ? ' on the next update' : '');
+  return recipeTitle(job.recipe) + (job.game === 'staging' ? ' · next update' : '');
 }
 function elapsed() { return S.status && S.status.running ? S.status.seconds + (Date.now() - S.statusAt) / 1000 : 0; }
 function progress() {
@@ -638,8 +730,9 @@ function renderLive() {
   const box = $('live');
   box.replaceChildren(...items.map((item) => {
     const job = item.job;
-    const where = job.kind === 'load-test' ? 'loads the finished file' : job.kind === 'update' ? 'from Steam'
-      : `${fmt(job.size)} · ${job.seed ? 'seed ' + job.seed : 'random seed'}`;
+    const where = job.kind === 'load-test' ? 'loads the finished file' : job.kind === 'update' ? 'from Steam' : job.kind === 'models-3d' ? 'from your copy of the game'
+      : job.kind === 'remove-staging' ? 'about 6 GB'
+      : `${sizeOf(job)} · ${job.seed ? 'seed ' + job.seed : 'random seed'}`;
     const sub = item.kind === 'running' ? el('span', { class: 's' }, el('span', { class: 'clock', text: clock(elapsed()) }), ` · ${cleanStep(S.status.step) || 'starting the game'}`)
       : el('span', { class: 's', text: item.kind === 'waiting' ? `${where} · waiting` : 'see why' });
     const p = item.kind === 'running' ? progress() : null;
@@ -662,7 +755,7 @@ function renderLive() {
 // The map being made, in the place of a map: what it is, how far it has come, and what waits behind it.
 function showLive() {
   S.current = LIVE;
-  history.replaceState(null, '', '#making');
+  address();
   for (const item of document.querySelectorAll('.item')) item.classList.toggle('on', item.classList.contains('live'));
   S.views = [];
   renderLive();
@@ -680,17 +773,21 @@ function renderLiveView() {
     const job = running.job;
     const p = progress();
     head.push(el('h1', { text: (job.kind === 'generate' ? 'Making ' : '') + liveTitle(running) }),
-      el('div', { class: 'facts' }, job.kind === 'generate' ? [el('span', {}, 'Size ', el('b', { text: fmt(job.size) })), el('span', {}, 'Seed ', el('b', { text: job.seed ? String(job.seed) : 'random' }))] : null,
+      el('div', { class: 'facts' }, job.kind === 'generate' ? [el('span', {}, 'Size ', el('b', { text: sizeOf(job) })), el('span', {}, 'Seed ', el('b', { text: job.seed ? String(job.seed) : 'random' }))] : null,
         el('span', {}, 'Running for ', el('b', { class: 'clock', text: clock(elapsed()) })), p.text ? el('span', { class: 'eta', text: p.text }) : null),
       el('div', { class: 'progress' + (p.share == null ? ' unknown' : '') }, el('i', { style: p.share == null ? inStep(1800) : `transform: scaleX(${p.share})` })),
-      el('div', { class: 'note' }, 'The game is at: ', el('b', { text: cleanStep(status.step) || 'starting' }),
+      el('div', { class: 'note' }, job.kind === 'models-3d' ? 'Now: ' : 'The game is at: ', el('b', { text: cleanStep(status.step) || 'starting' }),
         job.note ? el('span', { class: 'muted', text: ` · ${job.note}` }) : null),
       el('div', { class: 'note muted', text: job.kind === 'load-test' ? 'The result appears on the map\'s page.'
-        : job.kind === 'update' ? 'steamcmd brings the game to Steam\'s newest public build; maps wait until it is done. On Windows its progress shows only when it ends.'
-          : 'When it is done the map opens here by itself, with its checks. You can leave this page and come back.' }));
+        : job.kind === 'models-3d' ? 'Monuments and rocks for the 3D view, made once per game build from your copy of the game. Maps wait until they are done.'
+        : job.kind === 'update' && job.game === 'staging' ? 'The next update\'s game is brought to Steam\'s newest build of its branch (about 6 GB the first time). Its maps wait until it is done.'
+        : job.kind === 'update' && job.forced_wipe ? 'This game was last updated before the forced wipe: once Steam has that update, the game is brought to it, and the maps after it are made on it. Until then they are made on this build.'
+        : job.kind === 'update' ? 'The game is brought to Steam\'s newest public build; maps wait until it is done. On Windows the progress shows only at the end.'
+        : job.kind === 'remove-staging' ? 'The next update\'s game is deleted; your maps stay, those made on it with their badge.'
+          : 'The map opens here, with its checks, when it is done. You can leave this page and come back.' }));
   } else if (failed) {
     const last = status.last;
-    head.push(el('h1', { text: 'The last map was not made' }),
+    head.push(el('h1', { text: (failed.job || {}).kind === 'models-3d' ? 'The 3D models were not made' : 'The last map was not made' }),
       el('div', { class: 'facts' }, el('span', {}, 'Settings ', el('b', { text: liveTitle(failed) })), el('span', {}, 'Stopped after ', el('b', { text: clock(last.seconds) }))),
       el('pre', { class: 'mono tail', text: last.tail.join('\n') || 'no output' }),
       el('div', { class: 'tools' }, el('button', { class: 'btn', text: 'Dismiss', onclick: () => { try { localStorage.setItem('rustmapgen-dismissed', failureKey(last)); } catch { /* shown until the next run */ } load(null, true); } })));
@@ -699,8 +796,8 @@ function renderLiveView() {
   }
   if (waiting.length) {
     head.push(el('div', { class: 'waiting' }, el('h2', { text: `Waiting · ${waiting.length}` }),
-      el('ol', {}, waiting.map((item) => el('li', {}, el('b', { text: liveTitle(item) }), ' ', el('span', { class: 'muted', text: item.job.kind === 'load-test' ? 'game test'
-        : item.job.kind === 'update' ? 'from Steam' : `${fmt(item.job.size)} · ${item.job.seed ? 'seed ' + item.job.seed : 'random seed'}` })))),
+      el('ol', {}, waiting.map((item) => el('li', {}, el('b', { text: liveTitle(item) }), ' ', el('span', { class: 'muted', text: item.job.kind === 'load-test' ? 'load test' : item.job.kind === 'models-3d' ? '3D models' : item.job.kind === 'remove-staging' ? 'about 6 GB'
+        : item.job.kind === 'update' ? 'from Steam' : `${sizeOf(item.job)} · ${item.job.seed ? 'seed ' + item.job.seed : 'random seed'}` })))),
       el('button', { class: 'btn danger', 'data-testid': 'cancel-waiting', text: waiting.length === 1 ? 'Cancel the waiting map' : `Cancel all ${waiting.length} waiting`, onclick: cancelWaiting })));
   }
   $('head').replaceChildren(...head);
@@ -742,7 +839,7 @@ function renderUpdates() {
   const g = U.game;
   const steam = g && g.steam && g.steam.public;
   const gameNewer = !!steam && !!i.build && Number(steam) > Number(i.build);
-  const updating = !!S.status && ((S.status.job || {}).kind === 'update' || (S.status.queue || []).some((job) => job.kind === 'update'));
+  const updating = updateQueued('public');
   $('updates-btn').classList.toggle('new', !!(a && a.newer && a.how !== 'development') || gameNewer);
   $('updates-btn').setAttribute('aria-expanded', String(U.open));
   box.hidden = !U.open;
@@ -762,7 +859,7 @@ function renderUpdates() {
   if (updating) gameNote = note('The game is being updated: see Maps.');
   else if (U.busy === 'game-check') gameNote = note('Asking Steam (about 10 seconds)…');
   else if (g && g.error) gameNote = note(g.error, 'bad');
-  else if (steam) gameNote = note((gameNewer ? `Steam has build ${steam}.` : 'Steam has no newer build.') + (g.steam.staging ? ` Staging: build ${g.steam.staging}.` : ''), gameNewer ? '' : 'good');
+  else if (steam) gameNote = note(gameNewer ? `Steam has build ${steam}.` : 'Steam has no newer build.', gameNewer ? '' : 'good');
   fill(box,
     el('div', { class: 'u-row' },
       el('span', { class: 'u-head' }, el('b', { text: 'RustMapGen' }), ` ${S.version || ''}`),
@@ -776,8 +873,72 @@ function renderUpdates() {
       el('span', { class: 'u-tools' }, gameNewer && !updating
         ? el('button', { class: 'btn primary', type: 'button', 'data-testid': 'game-update', disabled: !!U.busy, onclick: updateGame, text: 'Update the game' })
         : el('button', { class: 'btn', type: 'button', 'data-testid': 'game-check', disabled: !!U.busy || updating, onclick: checkGame, text: 'Check' })),
-      gameNote));
+      gameNote),
+    stagingRow(i));
 }
+
+// The next update's game: there in the days before the forced wipe (New Map → Game), its build, a mod that does not load
+// on it, and its removal.
+function stagingRow(i) {
+  const updatingStaging = updateQueued('staging');
+  const g = i.staging || {};
+  const w = (S.status && S.status.staging) || {};
+  if (!g.installed && !w.open) return null;
+  const removing = !!S.status && [S.status.job || {}, ...(S.status.queue || [])].some((job) => job.kind === 'remove-staging');
+  let text = w.open ? (w.wipe ? `Open for the forced wipe of ${w.wipe}, on Steam's ${w.branch} branch.` : 'Open for testing.')
+    : w.released ? `Closed: the forced wipe's update is out (public build ${w.released.public}). Make maps on the public game: it is brought to the update first.`
+      : `Closed: ${w.reason}.`;
+  if (updatingStaging) text = 'The next update\'s game is being updated: see Maps.';
+  else if (g.mod_broken) text = `The mod does not work on build ${g.mod_broken.build} of the next update yet: check for a newer RustMapGen, above.`;
+  return el('div', { class: 'u-row', 'data-testid': 'staging-row' },
+    el('span', { class: 'u-head' }, el('b', { text: 'Next update' }), g.installed ? ` build ${g.build || '?'}` : ' not installed yet'),
+    el('span', { class: 'u-tools' }, g.installed && !w.open ? el('button', { class: 'btn', type: 'button', 'data-testid': 'remove-staging', disabled: !!U.busy || removing,
+      onclick: removeStaging, text: removing ? 'Removing…' : 'Remove (about 6 GB)' }) : null),
+    el('p', { class: 'u-note' + (g.mod_broken ? ' bad' : '') }, text, w.open && (w.changes || []).length
+      ? el('button', { type: 'button', class: 'link', text: ' What changes', onclick: () => showChanges(true) }) : null));
+}
+
+// What changes in the maps of the next update, in the authors' words: shown by itself once for each check they
+// declared, and again from its links. A modal, so it stays out of the page.
+let changesShown = null;
+function showChanges(asked) {
+  const w = (S.status && S.status.staging) || {};
+  if (!w.open || !(w.changes || []).length) return;
+  if (!asked) {
+    let seen = changesShown;
+    try { seen = localStorage.getItem('rustmapgen-next-seen') || seen; } catch { /* this visit only */ }
+    if (seen === w.key) return;
+    changesShown = w.key;
+    try { localStorage.setItem('rustmapgen-next-seen', w.key); } catch { /* this visit only */ }
+  }
+  let box = $('changes-dialog');
+  if (!box) {
+    box = el('dialog', { id: 'changes-dialog', class: 'changes', 'data-testid': 'changes-dialog', 'aria-labelledby': 'changes-title' });
+    box.addEventListener('click', (event) => { if (event.target === box) box.close(); });
+    document.body.append(box);
+  }
+  fill(box,
+    el('h2', { id: 'changes-title', text: `Maps for the forced wipe of ${w.wipe}` }),
+    el('p', { class: 'muted', text: `Checked by the RustMapGen authors${w.checked ? ` on ${w.checked}` : ''}, on Steam's ${w.branch} branch`
+      + `${w.build ? ` (build ${w.build})` : ''}. What changes in the maps:` }),
+    el('ul', {}, w.changes.map((line) => el('li', { text: line }))),
+    el('p', { class: 'muted', text: 'New Map → Game → Next update makes maps on it, on a game of its own (about 6 GB, downloaded before the first map). Maps made on the public game are last month\'s until the update is out.' }),
+    el('div', { class: 'changes-actions' }, el('button', { class: 'btn primary', type: 'button', text: 'Close', onclick: () => box.close() })));
+  if (!box.open) box.showModal();
+}
+
+// Whether an update of that game ('public' or 'staging') runs or waits in the queue.
+function updateQueued(which) {
+  const jobs = S.status ? [S.status.job || {}, ...(S.status.queue || [])] : [];
+  return jobs.some((job) => job.kind === 'update' && (job.game === 'staging') === (which === 'staging'));
+}
+// A job made at the size its settings give says so: it has no size of its own.
+const sizeOf = (job) => (job.size ? fmt(job.size) : 'preset size');
+
+const removeStaging = () => updateStep('remove-staging', async () => {
+  if (!confirm('Remove the next update\'s game (about 6 GB)? Your maps stay, those made on it with their badge.')) return;
+  try { renderStatus((await api('/api/remove-staging', { method: 'POST', headers: SEND, body: '{}' })).generator); } catch (error) { alert(error.message); }
+});
 
 async function updateStep(busy, work) {
   U.busy = busy;
@@ -823,6 +984,7 @@ function scheduleStatusPoll(delay) {
 // ---------- the two views ----------
 function showMaps() {
   S.tab = 'maps';
+  address();
   $('list').hidden = false;
   $('e-nav').hidden = true;
   if (S.current === LIVE) renderLiveView();
@@ -834,6 +996,7 @@ function showMaps() {
 }
 function showEditor() {
   S.tab = 'gen';
+  address();
   $('list').hidden = true;
   $('e-nav').hidden = false;
   $('main').hidden = true;

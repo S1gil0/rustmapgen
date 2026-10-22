@@ -268,6 +268,17 @@ function fitLimits(recipe) {
     moved.push('the middle search widens by 0.1 m');
     recipe.centre.grow_m = 0.1;
   }
+  // Templates this computer does not have (settings this browser kept from another install, saved ones or a map's from
+  // elsewhere): out, and said, or no map could be made with them and nothing on the page would show why.
+  if (Array.isArray(E.data.templates) && recipe.templates) {
+    const have = new Set(E.data.templates.map((tpl) => tpl.file));
+    const gone = recipe.templates.filter((file) => !have.has(file));
+    if (gone.length) {
+      moved.push(`${gone.length === 1 ? 'a template' : `${gone.length} templates`} not on this computer taken out (${gone.join(', ')}; `
+        + 'add it under Custom prefabs to use it)');
+      recipe.templates = recipe.templates.filter((file) => have.has(file));
+    }
+  }
   const around = new Map((E.data.templates || []).filter((tpl) => tpl.prefab).map((tpl) => [tpl.file, tpl.prefab]));
   const seen = new Set();
   const kept = (recipe.templates || []).filter((file) => !around.has(file) || (!seen.has(around.get(file)) && seen.add(around.get(file))));
@@ -281,7 +292,7 @@ function fitLimits(recipe) {
   }
   return moved;
 }
-const fitted = (moved) => (moved.length ? ` Brought within the limits: ${moved.join(', ')}.` : '');
+const fitted = (moved) => (moved.length ? ` Changed so a map can be made from them: ${moved.join(', ')}.` : '');
 
 // Before other settings replace the copy: one question when it holds changes.
 function leaveChanges(next) {
@@ -439,9 +450,9 @@ function quickSection(r) {
         if (state === 'share') { t.land_share = Math.min(t.land_share ?? 0.62, landMax(r.size)); delete t.coast_lift_m; } else { delete t.land_share; delete t.coast_lift_m; }
         renderEditor();
       }, ['game', 'share'], { game: 'As the game', share: 'Set the size' }, null),
-      'the game alone makes about half of a large map land'),
+      'the game alone: about half of a large map is land'),
       t.land_share != null ? row('Land, share of the square', slider(Math.round(t.land_share * 100), { min: 25, max: Math.round(landMax(r.size) * 100), step: 1, label: 'Land share' },
-        (v) => { t.land_share = v / 100; }, (v) => `${v} %`), `more land, more room for monuments; ${fmt(landMax(r.size) * 100)} % at the most on a map of ${fmt(r.size)}`) : null,
+        (v) => { t.land_share = v / 100; }, (v) => `${v} %`), `more land, more room for monuments; at most ${fmt(landMax(r.size) * 100)} % on a map of ${fmt(r.size)}`) : null,
       row('Hills', tri(hills, (state) => {
         if (state === 'lower') {
           t.profile = copy(r.size < 2500 ? LOWER_HILLS_SMALL : LOWER_HILLS);
@@ -457,7 +468,7 @@ function quickSection(r) {
         renderEditor();
       }, ['game', 'wide'], { game: 'As the game', wide: 'Wide' }, null), 'Wide: a broad shallow strip along the coast'),
       el('div', { class: 'checks' },
-        toggle('Rail ring', r.rail_ring === 'always', (on) => { r.rail_ring = on ? 'always' : 'game'; renderEditor(); }, `the game alone: from size ${fmt(E.data.catalog.rail_ring_game_size)}`),
+        toggle('Rail ring', r.rail_ring === 'always', (on) => { r.rail_ring = on ? 'always' : 'game'; renderEditor(); }, `the game adds one from size ${fmt(E.data.catalog.rail_ring_game_size)}`),
         toggle('Building on roads', r.build_on_roads, (on) => { r.build_on_roads = on; }, 'roads stay; players may build on them'),
         toggle('Outpost in the middle', r.centre.monument === 'compound', (on) => {
           r.centre.monument = on ? 'compound' : '';
@@ -500,16 +511,18 @@ function templatesSection(r) {
         touch();
         if (rivals.length) { renderEditor(); say(`One template per monument: ${rivals.join(', ')} unticked for ${tpl.file}.`); }
       }); return box; })(),
-    el('span', { class: 'name' }, tpl.file, el('br'), el('small', { text: tpl.monument ? `${tpl.prefabs} prefabs around the ${tpl.monument}` + (tpl.dropped ? `, ${tpl.dropped} the game does not know (left out)` : '') : 'checked when the first map is made' })),
+    el('span', { class: 'name' }, tpl.file, el('br'), el('small', { text: tpl.monument ? `${tpl.prefabs} prefabs around the ${tpl.monument}` + (tpl.dropped ? `, ${tpl.dropped} unknown to the game (left out)` : '') : 'checked when the first map is made' })),
     el('button', { class: 'link', text: 'delete', onclick: () => remove(tpl.file) })));
   const missing = r.templates.filter((name) => !list.some((tpl) => tpl.file === name));
-  return section('prefabs', 'Custom prefabs', 'your own prefabs around a monument, added to every copy of it',
-    rows.length ? el('div', { class: 'tpl-list' }, rows) : el('p', { class: 'e-note', text: 'No template yet. Without one, every monument is the game\'s own.' }),
-    missing.length ? el('p', { class: 'e-note', text: `These settings name templates that are not here: ${missing.join(', ')}. Add them or untick them before making maps.` }) : null,
+  return section('prefabs', 'Custom prefabs', 'your prefabs around a monument, on every copy of it',
+    rows.length ? el('div', { class: 'tpl-list' }, rows) : el('p', { class: 'e-note', text: 'No template yet: monuments stay as the game makes them.' }),
+    missing.length ? el('p', { class: 'e-note' }, `Not on this computer: ${missing.join(', ')}. Add ${missing.length === 1 ? 'it' : 'them'} again, or `,
+      el('button', { type: 'button', class: 'link', text: `take ${missing.length === 1 ? 'it' : 'them'} out of these settings`, onclick: () => {
+        r.templates = r.templates.filter((name) => !missing.includes(name)); touch(); renderEditor(); } })) : null,
     el('div', { class: 'upload' }, input, el('button', { class: 'btn', type: 'button', text: 'Add template', onclick: upload })),
-    el('p', { class: 'e-note', text: 'A template is a small .map from a map editor: one game monument and what you built around it. One template per monument can be ticked.' }),
+    el('p', { class: 'e-note', text: 'A .map from a map editor with one game monument and your prefabs around it. One template per monument can be ticked.' }),
     row('Leave out of templates', lines(r.template_skip, (value) => { r.template_skip = value; }, 'Template prefabs to leave out', 'one per line, e.g. snowmobilespawner'),
-      'prefabs whose path holds one of these lines'));
+      'prefabs whose path contains one of these lines'));
 }
 
 function lines(list, onChange, label, placeholder) {
@@ -554,7 +567,7 @@ function renderEditor() {
     const places = step ? stepCount(step) : 0;
     const others = places > 0 ? E.data.catalog.monuments.filter((o) => o.prefab !== m.prefab && r.monuments[o.prefab] === 'want' && stepOf(o) === step) : [];
     if (others.length < places || !others.length) { note.hidden = true; return true; }
-    const how = 'To have more, raise "How many" of that step under Placement steps.';
+    const how = 'For more, raise its "How many" under Placement steps.';
     if (places === 1) {
       for (const o of others) { const [set, control] = cells.get(o.prefab); set('any'); control.set('any'); }
       fill(note, `The game places one ${step.label} a map: ${m.label} is preferred now, and ${others.map((o) => o.label).join(', ')} back to Auto. ${how}`);
@@ -601,7 +614,7 @@ function renderEditor() {
   paintCounts();
   out.push(el('div', { class: 'e-sec plain', 'data-section': 'Monuments', 'data-id': 'monuments' },
     el('section', { class: 'panel' },
-      el('div', { class: 'panel-head' }, el('h2', { text: 'Monuments' }), el('span', { class: 'hint', text: 'which monuments the map should have; a number like 3,500+ is the smallest map the game alone puts it on' })),
+      el('div', { class: 'panel-head' }, el('h2', { text: 'Monuments' }), el('span', { class: 'hint', text: 'which monuments the map should have; 3,500+ is the smallest map the game alone puts one on' })),
       legend),
     ...groupCards));
 
@@ -617,8 +630,8 @@ function renderEditor() {
         renderEditor();
       }, ['share', 'lift'], { share: 'By share of land', lift: 'By metres' }, null)),
       mode === 'share'
-        ? row('Land, share of the square', slider(Math.round(t.land_share * 100), { min: 20, max: Math.round(landMax(r.size) * 100), step: 1, label: 'Land share (detail)' }, (v) => { t.land_share = v / 100; }, (v) => `${v} %`), `the game alone: about 50 % at 3500, 20 to 27 % at 1600; the shore moves 20 m at the most, which allows ${fmt(landMax(r.size) * 100)} % on a map of ${fmt(r.size)}`)
-        : row('Shore moved out by', unit(number(t.coast_lift_m ?? 0, { min: -10, max: 20, step: 0.5, label: 'Shore moved by metres' }, (v) => { t.coast_lift_m = v ?? 0; }), 'm'), 'metres of sea floor turned into land; 0 keeps the game\'s own shore'),
+        ? row('Land, share of the square', slider(Math.round(t.land_share * 100), { min: 20, max: Math.round(landMax(r.size) * 100), step: 1, label: 'Land share (detail)' }, (v) => { t.land_share = v / 100; }, (v) => `${v} %`), `the game alone: about 50 % at 3500, 20 to 27 % at 1600; at most ${fmt(landMax(r.size) * 100)} % on a map of ${fmt(r.size)} (the shore moves 20 m at most)`)
+        : row('Shore moved out by', unit(number(t.coast_lift_m ?? 0, { min: -10, max: 20, step: 0.5, label: 'Shore moved by metres' }, (v) => { t.coast_lift_m = v ?? 0; }), 'm'), 'how far the shore moves out; 0 keeps the game\'s own'),
       row('Heights', tri(t.profile ? 'profile' : 'scale', (state) => {
         if (state === 'profile') { t.profile = t.profile || copy(r.size < 2500 ? LOWER_HILLS_SMALL : LOWER_HILLS); delete t.height_scale; } else { delete t.profile; t.height_scale = t.height_scale ?? 1; }
         renderEditor();
@@ -627,10 +640,10 @@ function renderEditor() {
         ? profileKeys.map(([key, label]) => row(label, unit(number(t.profile[key], { min: 0.5, max: limit('height_m'), step: 0.1, label }, (v) => { if (v != null) t.profile[key] = v; }), 'm')))
         : [row('Every height times', unit(number(t.height_scale ?? 1, { min: 0.2, max: 2, step: 0.05, label: 'Height scale' }, (v) => { t.height_scale = v ?? 1; }), '×'), '1 = the game\'s own hills; 0.65 flattens them')]),
       row('Keep ridges and slopes narrower than', unit(number(t.relief_radius_m ?? 0, { min: 0, max: 400, step: 5, label: 'Relief radius' }, (v) => { t.relief_radius_m = v ?? 0; }), 'm'),
-        '0 bends each height alone and flattens slopes; 70 keeps them'),
+        '0 flattens slopes with the hills; 70 keeps them'),
       row('…at this strength', unit(number(t.relief_keep ?? 1, { min: 0, max: 2, step: 0.05, label: 'Relief strength' }, (v) => { t.relief_keep = v ?? 1; }), '×'), '1 = as the game made them'),
       toggle('Shape the shallows', !!t.shallows, (on) => { if (on) t.shallows = copy(WIDE_SHALLOWS); else delete t.shallows; renderEditor(); },
-        'the share of the square no deeper than each depth'),
+        'how much of the square is no deeper than each depth'),
       ...(t.shallows || []).map((pair, index) => row(`Sea no deeper than ${pair[0]} m`, unit(number(Math.round(pair[1] * 1000) / 10, { min: 0.1, max: 40, step: 0.1, label: `Share of sea to ${pair[0]} m` },
         (v) => { if (v != null) t.shallows[index][1] = v / 100; }), '%'))),
       row('Level the land around the middle within', unit(number(t.middle_plateau_m ?? 0, { min: 0, max: 600, step: 10, label: 'Middle plateau' }, (v) => { t.middle_plateau_m = v ?? 0; }), 'm'),
@@ -709,10 +722,10 @@ function renderEditor() {
       STEP_FIELDS.map(([key, label, max]) => el('label', { class: 'e-step-in' }, el('span', { class: 'lbl', text: label }), cell(key, max))));
   });
   out.push(el('section', { class: 'panel e-sec', 'data-section': 'Placement steps', 'data-id': 'steps' },
-    el('div', { class: 'panel-head' }, el('h2', { text: 'Placement steps' }), el('span', { class: 'hint', text: 'the game places monuments group by group; an empty box keeps the game\'s value, shown in grey' })),
+    el('div', { class: 'panel-head' }, el('h2', { text: 'Placement steps' }), el('span', { class: 'hint', text: 'the game places monuments group by group; an empty box keeps the game\'s value (in grey)' })),
     el('div', { class: 'e-steps' }, el('div', { class: 'e-step head' }, el('span', { text: 'Step' }), STEP_FIELDS.map(([, label]) => el('span', { class: 'r', text: label }))), stepRows)));
 
-  out.push(section('block', 'Block', 'any prefab whose path holds one of these lines is never placed',
+  out.push(section('block', 'Block', 'prefabs whose path contains one of these lines are never placed',
     lines(r.block_extra, (value) => { r.block_extra = value; }, 'More path fragments to block', 'one per line, e.g. autospawn/decor/roadside/'),
     el('p', { class: 'e-note', text: 'Rocks, cliffs and decor can be blocked here too. Blocking bushes or trees fills the game\'s log with warnings.' })));
 
@@ -840,13 +853,42 @@ function renderBar() {
     el('label', {}, 'Seed', el('input', { id: 'e-seed', type: 'number', min: 1, max: 2147483647, placeholder: 'random', class: 'num-in wide-in' })),
     el('label', {}, 'Maps', el('input', { id: 'e-count', type: 'number', min: 1, max: 12, value: 1, class: 'num-in' })),
     el('label', { class: 'grow' }, 'Note', el('input', { id: 'e-note', type: 'text', maxlength: 200, placeholder: 'what this run is trying' })),
+    el('span', { id: 'e-game-box', class: 'e-game' }),
     el('span', { class: 'e-actions' },
       el('button', { class: 'btn primary', 'data-testid': 'generate', onclick: generate, text: 'Make maps' }),
       el('button', { id: 'e-save', class: 'btn', onclick: saveAs, text: 'Save as…' }),
       listed ? el('button', { class: 'btn', 'data-testid': 'remove-recipe', onclick: removeSaved, text: 'Remove' }) : null),
+    el('p', { id: 'e-staging', class: 'e-message', 'data-testid': 'staging-notice', hidden: true }),
     el('div', { id: 'e-changes', class: 'e-changes', 'data-testid': 'changes', hidden: true }),
     el('p', { id: 'e-message', class: 'e-message', hidden: true }));
   for (const id of ['e-seed', 'e-count', 'e-note']) $(id).addEventListener('input', saveDraft);
+  renderGame();
+}
+
+// The game the maps are made on: Public, or the Next update once a RustMapGen update has declared it, until the forced
+// wipe's update is out ("staging" in the code). Shown again whenever the panel's status says it opened or closed.
+function renderGame() {
+  const box = $('e-game-box');
+  const note = $('e-staging');
+  if (!box || !note) return;
+  const w = (S.status && S.status.staging) || {};
+  if (!w.open) E.game = 'public';
+  const shown = box.dataset.open === String(!!w.open);
+  if (!shown) {
+    box.dataset.open = String(!!w.open);
+    box.replaceChildren(w.open ? el('label', {}, 'Game', el('select', { id: 'e-game', 'data-testid': 'game',
+      onchange: (event) => { E.game = event.target.value; renderGame(); } },
+      el('option', { value: 'public', text: 'Public', selected: E.game !== 'staging' }),
+      el('option', { value: 'staging', text: w.wipe ? `Next update (forced wipe ${w.wipe})` : 'Next update (test)', selected: E.game === 'staging' }))) : '');
+  }
+  const g = (S.install && S.install.staging) || {};
+  note.hidden = E.game !== 'staging';
+  if (note.hidden) return;
+  note.className = 'e-message' + (g.mod_broken ? ' bad' : ' warn');
+  fill(note, g.mod_broken ? `The mod does not work on build ${g.mod_broken.build} of the next update yet. `
+    : `${w.notice || 'The next update is open for testing outside its days.'}${g.installed ? '' : ' Its game (about 6 GB) is downloaded before the first map.'} `,
+  !g.mod_broken && (w.changes || []).length ? el('button', { type: 'button', class: 'link', text: 'What changes', onclick: () => showChanges(true) }) : null,
+  g.mod_broken ? el('button', { type: 'button', class: 'link', text: 'Check for updates', onclick: () => { U.open = true; checkApp(); } }) : null);
 }
 
 function say(text, bad, action, about) {
@@ -894,11 +936,11 @@ async function generate() {
   const known = E.data.recipes.some((x) => x.name === E.base && !x.broken);
   const edited = E.from || !known || changes().some((change) => change.key !== 'size');
   const name = edited ? `${(E.base || 'custom').replace(/-edit$/, '')}-edit`.slice(0, 48) : E.base;
-  const body = { seed: $('e-seed').value, count: $('e-count').value, note: $('e-note').value, size: E.recipe.size };
+  const body = { seed: $('e-seed').value, count: $('e-count').value, note: $('e-note').value, size: E.recipe.size, game: E.game || 'public' };
   if (edited) body.settings = Object.assign({}, E.recipe, { name }); else body.recipe = E.base;
   try {
     const answer = await api('/api/generate', { method: 'POST', headers: SEND, body: JSON.stringify(body) });
-    say(`${answer.message}. A map takes a few minutes; under "Maps" you can watch it being made.`, false, { text: 'Watch it', onclick: () => { showMaps(); showLive(); } }, 'queue');
+    say(`${answer.message}. A map takes a few minutes: watch it under Maps.`, false, { text: 'Watch it', onclick: () => { showMaps(); showLive(); } }, 'queue');
     renderStatus(answer.generator);
   } catch (error) { say(error.message, true); }
 }

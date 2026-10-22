@@ -2,7 +2,7 @@
   "name": "large",
   "title": "Large",
   "size": 4000,
-  "source": "The medium map with room to spare: Radtown and the jungle ruins come back, two or three underwater labs (World features), and the canyons the game adds from 4500 blocked (Scenery). Every big monument set to \"Prefer\", caves, swamps, wells, two of the ice lakes, the Ranch, the Large Barn and the Bandit Camp to \"Never\", the Outpost searched from the middle. The land (Basics): Island \"Set the size\" at 62 % of the square, Hills \"Lower\", Shallows \"Wide\", like the maps busy community servers run; the game alone makes less land and taller hills, and some wanted monuments then find no room.",
+  "source": "The medium map with Radtown and the jungle ruins back, two or three underwater labs and no canyons. 62 % land, lower hills, wide shallows.",
   "world": {
     "MainRoads": true,
     "SideRoads": true,

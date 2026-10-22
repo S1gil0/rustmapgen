@@ -2,7 +2,7 @@
   "name": "small",
   "title": "Small, no safe zones",
   "size": 2000,
-  "source": "A small fighting map. Monuments: the safe zones (the Outpost, the Bandit Camp, the fishing villages) set to \"Never\", with the Ranch, the Large Barn and the big ones a small map has no room for (the Airfield, the Launch Site, the Giant Excavator, the Power Plant, the Train Yard and more); the Missile Silo, the oil rigs and The Dome to \"Prefer\". Nothing in the middle (Outpost section), building on roads allowed and a rail ring asked for (Basics). Not every small map gets its rail ring: make a few and keep one that passes its checks. The land (Basics): Island \"Set the size\" at 40 % of the square, Hills \"Lower\", Shallows \"Wide\", like the maps busy community servers run; the game alone makes less land and taller hills, and some wanted monuments then find no room.",
+  "source": "A fighting map with 40 % land: no safe zones or room-hungry monuments, building on roads allowed, a rail ring (not every seed gets one: keep one that passes).",
   "world": {
     "MainRoads": true,
     "SideRoads": true,

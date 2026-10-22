@@ -12,7 +12,7 @@ import math
 
 import numpy as np
 
-from .mapfile import MapFile, prefab_id
+from .mapfile import TEMPLATE_RECORDS, TEMPLATE_WORLD, MapFile, prefab_id
 
 MONUMENT_FOLDER = '/autospawn/monument/'
 # Folders of prefabs the game has moved since a template was made: (where they were, where they
@@ -89,7 +89,7 @@ def angle_between(a, b):
 
 class Template:
     def __init__(self, path, names, skip=()):
-        source = MapFile(path, paths=False)
+        source = MapFile(path, paths=False, limit=TEMPLATE_WORLD, records=TEMPLATE_RECORDS)
         anchors = [i for i, ident in enumerate(source.id) if MONUMENT_FOLDER in names.get(int(ident), '')]
         if len(anchors) != 1:
             raise ValueError(f'{path}: {len(anchors)} monuments in the template, one expected')

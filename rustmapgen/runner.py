@@ -37,12 +37,21 @@ MOD_BROKEN = ('Failed to patch all hooks', 'Failed to load harmony mod', 'Failed
 MOD_PATIENCE = 180
 # The game has begun the map: the mod says it is in long before this (line 42 against 207 of a log).
 UNDERWAY = 'Generating procedural map'
+# An error the game's own world setup did not survive (a staging build can have one): a frame of its coroutine in a
+# stack trace. When no further step of the map follows within CRASH_PATIENCE seconds, the map will never be made.
+WORLD_SETUP = 'at WorldSetup+<InitCoroutine>'
+STEP = re.compile(r'^\[\d+(\.\d+)?s\] ')
+EXCEPTION = re.compile(r'^([A-Za-z_.]*Exception): ')
+CRASH_PATIENCE = 60
 WINDOWS = os.name == 'nt'
 # The file that makes a game folder this generator's own, and the lock of a run, both in that folder.
 MARKER = 'rustmapgen-game.txt'
 LOCK_FILE = 'rustmapgen.lock'
 # Present while steamcmd changes the game: no map is made on a game an update left half done.
 UPDATING = 'rustmapgen-updating.txt'
+# Whether the mod loaded in this game's build, as the last run found: a mod that did not load is not tried again on the
+# same build with the same mod (a newer RustMapGen, or another build of the game, tries again).
+MOD_RECORD = 'rustmapgen-mod.json'
 MARKER_TEXT = ('This Rust dedicated server belongs to RustMapGen, the map generator. Its HarmonyMods folder holds\n'
                'the generator\'s mod, which makes a server quit instead of opening: never run a server people\n'
                'play on from this folder.\n')
@@ -126,36 +135,50 @@ def lock():
         handle.close()
 
 
-def executable():
-    return paths.game('RustDedicated.exe' if WINDOWS else 'RustDedicated')
+def executable(folder=None):
+    return os.path.join(folder or paths.game(), 'RustDedicated.exe' if WINDOWS else 'RustDedicated')
 
 
-def game_branch():
+def _manifest(folder=None):
+    return os.path.join(folder or paths.game(), 'steamapps', f'appmanifest_{paths.GAME_APP}.acf')
+
+
+def game_branch(folder=None):
     """The branch of the installed game (public, staging...), from steamcmd's manifest; None when there is no install."""
     try:
-        with open(paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')) as handle:
+        with open(_manifest(folder)) as handle:
             match = re.search(r'"BetaKey"\s+"([^"]*)"', handle.read())
         return match.group(1) if match and match.group(1) else 'public'
     except OSError:
         return None
 
 
-def game_state():
+def game_state(folder=None):
     """steamcmd's StateFlags for the game ('4': fully installed; an update cut short leaves others); None when there is no install."""
     try:
-        with open(paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')) as handle:
+        with open(_manifest(folder)) as handle:
             match = re.search(r'"StateFlags"\s+"(\d+)"', handle.read())
         return match.group(1) if match else None
     except OSError:
         return None
 
 
-def game_build():
+def game_build(folder=None):
     """The build of the installed game, from steamcmd's manifest; None when there is no install."""
     try:
-        with open(paths.game('steamapps', f'appmanifest_{paths.GAME_APP}.acf')) as handle:
+        with open(_manifest(folder)) as handle:
             match = re.search(r'"buildid"\s+"(\d+)"', handle.read())
         return match.group(1) if match else None
+    except OSError:
+        return None
+
+
+def game_updated(folder=None):
+    """When steamcmd last installed or updated the game (unix time), from its manifest; None when there is no install."""
+    try:
+        with open(_manifest(folder)) as handle:
+            match = re.search(r'"LastUpdated"\s+"(\d+)"', handle.read())
+        return int(match.group(1)) if match else None
     except OSError:
         return None
 
@@ -266,6 +289,30 @@ def mod_source():
     raise FileNotFoundError('no built mod: run "python -m rustmapgen build-mod" (needs the .NET SDK) or reinstall')
 
 
+def mod_broken(folder=None):
+    """The record of a run whose mod did not load, when it is of this game's build and of the mod a run would put in now;
+    None otherwise."""
+    record = read_json(os.path.join(folder or paths.game(), MOD_RECORD))
+    if not isinstance(record, dict) or record.get('works') is not False or record.get('build') != game_build(folder):
+        return None
+    try:
+        return record if record.get('mod_sha256') == _digest(mod_source()) else None
+    except FileNotFoundError:
+        return None
+
+
+def _keep_mod_record(works):
+    try:
+        mod = _digest(mod_source())
+    except FileNotFoundError:
+        return
+    target = paths.game(MOD_RECORD)
+    with open(target + '.partial', 'w') as handle:
+        json.dump({'build': game_build(), 'branch': game_branch(), 'mod_sha256': mod, 'works': works,
+                   'when': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}, handle)
+    os.replace(target + '.partial', target)
+
+
 def describe_mod():
     """Which mod a run installs, in words."""
     try:
@@ -299,7 +346,8 @@ def install_mod():
 
 
 def _command(arguments, log, settings):
-    port = int(settings['game_port'])
+    from . import staging
+    port = int(settings['game_port']) + (staging.PORT_OFFSET if staging.active() else 0)     # the two games never share ports
     argv = [executable(), '-batchmode', '-nographics', '-logfile', log,
             '+server.identity', paths.IDENTITY, '+server.hostname', 'RustMapGen generator'] + arguments + [
             '+server.ip', '127.0.0.1', '+server.port', str(port), '+server.queryport', str(port + 2),
@@ -331,16 +379,24 @@ def _start(argv, env):
 
 
 def _stop(process):
-    """Stop the game and everything it started."""
+    """Stop the game and everything it started. Started in a group of its own on Linux, the whole group goes,
+    also when the program itself has ended and left something of its own running: a group's number is not
+    given to another process while anything of the group lives. On Windows the tree of the program, while
+    it runs."""
+    if not WINDOWS:
+        import signal
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:                 # nothing of the group is left
+            pass
+        if process.poll() is None:
+            process.wait(timeout=60)
+        return
     if process.poll() is not None:
         return
     try:
-        if WINDOWS:
-            if subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], capture_output=True, timeout=60).returncode:
-                process.kill()
-        else:
-            import signal
-            os.killpg(process.pid, signal.SIGKILL)
+        if subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], capture_output=True, timeout=60).returncode:
+            process.kill()
     except (OSError, subprocess.TimeoutExpired):
         process.kill()
     process.wait(timeout=60)
@@ -374,6 +430,21 @@ def _scan(text, mod_in):
     if any(word in text for word in MOD_BROKEN) or MOD_IDLE in text:
         return 'broken', mod_in
     return None, mod_in
+
+
+def _crash(text):
+    """'DivideByZeroException in GenerateDungeonBase.Process' when these lines hold an error the world setup did not
+    survive: the exception, and the step of the map it stopped (the frame under the world setup's); None otherwise."""
+    lines = text.splitlines()
+    crash = None
+    for number, line in enumerate(lines):
+        if STEP.match(line):
+            crash = None                # a step of the map after it: the map went on
+        elif WORLD_SETUP in line:
+            step = lines[number - 1].strip()[3:].split(' (')[0] if number and lines[number - 1].strip().startswith('at ') else 'the world setup'
+            kind = next((found.group(1) for found in (EXCEPTION.match(lines[back]) for back in range(number - 1, -1, -1)) if found), 'an error')
+            crash = f'{kind} in {step}'
+    return crash
 
 
 def _tail(path, start):
@@ -421,14 +492,24 @@ def run(job, arguments, progress=None, say=print):
     free = free_memory_gb()
     if free is not None and free < memory:
         raise Busy(f"{free} GB of memory free, {memory:g} GB needed for a map: close something and try again")
+    broken = mod_broken()
+    if broken:
+        raise RuntimeError(f'the mod does not work on {broken.get("branch") or "this"} build {broken["build"]} of the game yet (it did not load '
+                           f'there on {broken["when"][:10]}): a newer RustMapGen may bring one that does (Updates → Check for updates)')
     temp_start = wait_until_cool(cool, say=say)
     install_mod()
     log = os.path.join(job, 'log.txt')
     argv, isolated = _command(arguments, log, settings)
+    if not WINDOWS and settings.get('isolate_network') and not isolated:
+        # Asked for and not given: said, not refused (many systems keep these namespaces from ordinary users).
+        say('  no network isolation on this system (unshare -rn is refused): the game runs on the network; the mod '
+            'still keeps it from uploading the map or its picture and quits it before it would open to players', flush=True)
     pattern = re.compile(progress) if progress else None
     process = _start(argv, _environment(os.path.join(job, 'job.json')))
     started = time.monotonic()
     state, mod_in, position, carry, hottest, last = None, False, 0, b'', temp_start, ''
+    said = False                        # the game itself said the mod is not working (not mere silence)
+    crashed, crash_at, error = None, None, None
     try:
         while process.poll() is None:
             time.sleep(2)
@@ -437,12 +518,21 @@ def run(job, arguments, progress=None, say=print):
             # A whole marker counts at once, also on a line the game has not ended yet.
             trouble, mod_in = _scan(text + carry.decode('utf-8', 'replace'), mod_in)
             if trouble == 'early':
-                state = 'mod'
+                state, said = 'mod', True
                 say('  the game began the map without saying that the mod is in: stopped', flush=True)
                 break
             if trouble == 'broken':
-                state = 'mod'
+                state, said = 'mod', True
                 say('  the game did not load the whole mod: stopped', flush=True)
+                break
+            seen = _crash(text)
+            if seen:
+                crashed, crash_at = seen, time.monotonic()
+            elif crashed and any(STEP.match(line) for line in text.splitlines()):
+                crashed = None                  # the map goes on: the error was not the end of it
+            if crashed and time.monotonic() - crash_at > CRASH_PATIENCE:
+                state, error = 'crashed', crashed
+                say(f'  the game\'s own map generation stopped with an error ({crashed}): stopped', flush=True)
                 break
             if not mod_in and time.monotonic() - started > MOD_PATIENCE:
                 state = 'mod'
@@ -471,12 +561,16 @@ def run(job, arguments, progress=None, say=print):
     seconds = round(time.monotonic() - started)
     if state is None:
         if trouble:
-            state = 'mod'
+            state, said = 'mod', True
         elif code == 0 and os.path.exists(os.path.join(job, 'done')) and not os.path.exists(os.path.join(job, 'failed')):
             state = 'done'
         else:
             state = 'failed'
-    return state, seconds, {'exit_code': code, 'network_isolated': isolated, 'mod_loaded': mod_in,
+    # Kept for this build: the mod loaded, or the game said it did not. A game that only said nothing for MOD_PATIENCE (a slow
+    # start) is no reason to refuse every later map on this build: the next run tries again.
+    if (state == 'mod' and said) or mod_in:
+        _keep_mod_record(state != 'mod')
+    return state, seconds, {'exit_code': code, 'network_isolated': isolated, 'mod_loaded': mod_in, 'game_error': error,
                             'cpu_c_start': temp_start, 'cpu_c_peak': hottest, 'free_gb_start': free}
 
 
@@ -489,14 +583,27 @@ def gzip_log(job):
         os.unlink(log)
 
 
+def describe_game(folder=None):
+    """One game folder: installed, its build and branch, an update left half done, a mod that did not load there."""
+    folder = folder or paths.game()
+    broken = mod_broken(folder)
+    return {'folder': folder, 'installed': os.path.isfile(executable(folder)), 'build': game_build(folder), 'branch': game_branch(folder),
+            'updating': os.path.exists(os.path.join(folder, UPDATING)),
+            'mod_broken': {'build': broken.get('build'), 'branch': broken.get('branch'), 'when': broken.get('when')} if broken else None}
+
+
 def describe_install():
     """What this computer has, for `python -m rustmapgen doctor` and the panel."""
     settings = paths.settings()
+    from . import release, staging
+    unfinished = release.pending()
     return {'game': paths.game(), 'installed': os.path.isfile(executable()), 'build': game_build(), 'branch': game_branch(),
+            'update_pending': unfinished['version'] if unfinished else None,
             'update_unfinished': os.path.exists(paths.game(UPDATING)), 'oxide': has_oxide(), 'game_folder': 'RustMapGen\'s own' if os.path.isfile(paths.game(MARKER)) else 'not claimed yet',
             'mod': os.path.isfile(paths.game('HarmonyMods', MOD_FILE)), 'mod_used': describe_mod(), 'python': sys.version.split()[0],
             'free_gb': free_memory_gb(), 'cpu_c': cpu_temp(), 'isolate_network': bool(settings.get('isolate_network')) and can_isolate(),
-            'data': paths.data()}
+            'data': paths.data(), 'mod_broken': describe_game()['mod_broken'],
+            'staging': describe_game(staging.folder()) if os.path.isdir(staging.folder()) else {'folder': staging.folder(), 'installed': False}}
 
 
 def read_json(path):
