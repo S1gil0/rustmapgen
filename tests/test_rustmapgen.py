@@ -618,6 +618,135 @@ class ChecksTest(unittest.TestCase):
         self.assertGreater(len(reference), 20)
         self.assertFalse(set(reference) - catalog)
 
+    def test_the_usual_grounds_name_monuments_of_the_catalog(self):
+        shapes = checks.load_ground_shapes()
+        catalog = {row['prefab'] for row in recipes.load_catalog()['monuments']}
+        self.assertGreater(len(shapes), 20)
+        self.assertFalse(set(shapes) - catalog)
+        self.assertIn('launch_site_1', shapes)
+        for prefab, shape in shapes.items():
+            cells = int(round(2 * shape['radius'] / analyze.GROUND_STEP)) + 1
+            self.assertEqual(shape['usual'].shape, (cells, cells), prefab)
+            self.assertEqual(shape['own'].shape, (cells, cells), prefab)
+
+
+class GroundWorld:
+    """What ground_patches reads of a map: the height layer in metres and the size."""
+
+    def __init__(self, height, size):
+        self.height, self.size = height, size
+
+    def metres(self, name='height'):
+        return self.height
+
+
+class MonumentGroundTest(unittest.TestCase):
+    """The whole-ground half of "Monuments on the ground": a monument whose own ground a neighbour placed after it
+    cut down or raised. A Launch Site seen floating in the game on 2026-10-25 had over 8,000 m² of its ground more
+    than 5 m low beside the Power Plant, with its pivot as usual. Synthetic terrain, one cell a metre."""
+    SIZE, RES, RADIUS = 1000, 1001, 200
+    REFERENCE = {'ground_m': {'launch_site_1': 0.0}}
+
+    def flat(self, level=10.0):
+        return np.full((self.RES, self.RES), level, dtype=np.float32)
+
+    def shapes(self):
+        axis = np.arange(-self.RADIUS, self.RADIUS + 2, 4.0)
+        u, v = np.meshgrid(axis, axis)
+        own = (np.abs(u) <= 160) & (np.abs(v) <= 80)          # 81 x 41 cells of 16 m²: 53,136 m²
+        return {'launch_site_1': {'usual': np.zeros(u.shape, np.float32), 'own': own, 'radius': self.RADIUS}}
+
+    def outcome(self, height):
+        item = {'prefab': 'launch_site_1', 'folder': 'xlarge', 'label': 'Launch Site', 'x': 0.0, 'y': 10.0, 'z': 0.0, 'turn': 0.0,
+                'ground_m': 0.0}
+        analyze.ground_patches(GroundWorld(height, self.SIZE), [item], self.shapes(), checks.STRUCTURE['ground_patch_m'])
+        check = next(c for c in checks.structure({'monuments': [item]}, self.REFERENCE) if c['rule'] == checks.GROUND_RULE)
+        return item, check
+
+    def test_heights_are_relative_to_the_monument_and_follow_its_turn(self):
+        height = self.flat()
+        height[:, 600:701] += 5.0                   # world x from 100 to 200 m
+        item = {'x': 0.0, 'z': 0.0, 'y': 10.0, 'turn': 0.0}
+        grid = analyze.ground_grid(height, self.SIZE, item, 200, step=4.0)
+        axis = np.arange(-200, 202, 4.0)
+        self.assertEqual(grid.shape, (len(axis), len(axis)))
+        u = np.meshgrid(axis, axis)[0]
+        self.assertTrue(np.all(grid[(u >= 104) & (u <= 196)] == 5.0))
+        self.assertTrue(np.all(grid[u <= 96] == 0.0))
+        # Turned 90 degrees, the monument's +x points to the world's -z: a strip raised at world z -200 to -100 m
+        # lies at its x 100 to 200 m.
+        height = self.flat()
+        height[300:401, :] += 5.0                   # world z from -200 to -100 m
+        grid = analyze.ground_grid(height, self.SIZE, dict(item, turn=90.0), 200, step=4.0)
+        self.assertTrue(np.all(grid[(u >= 104) & (u <= 196)] == 5.0))
+
+    def test_the_usual_ground_and_the_cells_most_maps_agree_on(self):
+        rng = np.random.default_rng(1)
+        grids = []
+        for index in range(20):
+            grid = np.zeros((10, 10), np.float32)
+            grid[:, 5:] = rng.normal(0, 6, (10, 5))     # the land around: different on every map
+            if index == 0:
+                grid[:3, :3] = -6.0                      # one map's monument cut down
+            grids.append(grid)
+        usual, own = checks.ground_shape(grids)
+        self.assertTrue(own[:, :5].all())
+        self.assertFalse(own[:, 5:].any())
+        self.assertTrue(np.all(usual[:, :5] == 0.0))
+
+    def test_the_table_reads_back_without_its_about_and_is_empty_when_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'ground.npz')
+            self.assertEqual(checks.load_ground_shapes(path), {})
+            np.savez_compressed(path, **{'launch_site_1:usual': np.zeros((3, 3), np.float16), 'launch_site_1:own': np.ones((3, 3), bool),
+                                         'launch_site_1:radius': np.array(4), 'about': np.array('{"maps": 300}')})
+            shapes = checks.load_ground_shapes(path)
+            self.assertEqual(list(shapes), ['launch_site_1'])
+            self.assertEqual((shapes['launch_site_1']['radius'], shapes['launch_site_1']['own'].sum()), (4, 9))
+
+    def test_as_usual_it_passes(self):
+        item, check = self.outcome(self.flat())
+        self.assertEqual((item['ground_low_m2'], item['ground_high_m2'], item['ground_own_m2']), (0, 0, 53136))
+        self.assertTrue(check['ok'], check)
+        self.assertEqual(check['detail'], '1 monuments stand as the game stands them (1 looked at on all of their ground)')
+        # A monument known to only one half is counted once all the same.
+        other = {'prefab': 'radtown_1', 'folder': 'medium', 'label': 'Radtown', 'x': 0.0, 'y': 10.0, 'z': 0.0, 'turn': 0.0,
+                 'ground_low_m2': 0, 'ground_high_m2': 0, 'ground_own_m2': 900}
+        found = checks.structure({'monuments': [item, other]}, self.REFERENCE)
+        self.assertEqual(next(c for c in found if c['rule'] == checks.GROUND_RULE)['detail'],
+                         '2 monuments stand as the game stands them (2 looked at on all of their ground)')
+
+    def test_an_end_cut_down_by_a_neighbour_fails_it(self):
+        height = self.flat()
+        height[:, 340:381] -= 6.0                  # x from -160 to -120 m
+        item, check = self.outcome(height)
+        self.assertEqual(item['ground_low_m2'], 41 * 11 * 16)       # 11 columns of 4 m fall in it (u -160 .. -120)
+        self.assertFalse(check['ok'])
+        self.assertEqual(check['detail'], 'Launch Site: 7,216 m² of its ground more than 5 m lower (it floats there)')
+
+    def test_raised_ground_fails_it_as_buried_and_a_small_patch_does_not(self):
+        height = self.flat()
+        height[:, 340:381] += 8.0
+        self.assertIn('higher (it is buried there)', self.outcome(height)[1]['detail'])
+        height = self.flat()
+        height[500:509, 500:509] -= 8.0            # 3 x 3 cells: 144 m²
+        item, check = self.outcome(height)
+        self.assertEqual(item['ground_low_m2'], 144)
+        self.assertTrue(check['ok'])
+        height = self.flat()
+        height[500:504, 500:504] -= 4.0            # 4 m: within the limit
+        self.assertEqual(self.outcome(height)[0]['ground_low_m2'], 0)
+
+    def test_off_on_most_of_its_ground_the_game_changed_it_and_the_map_is_not_turned_down(self):
+        item, check = self.outcome(self.flat(30.0))    # all of it 20 m under the ground: a monument an update changed
+        self.assertTrue(check['ok'], check)
+        self.assertIn('the game has changed Launch Site since RustMapGen measured its ground: not counted', check['detail'])
+
+    def test_a_map_described_before_is_judged_on_its_pivots(self):
+        item = {'prefab': 'launch_site_1', 'label': 'Launch Site', 'ground_m': 0.2}
+        check = next(c for c in checks.structure({'monuments': [item]}, self.REFERENCE) if c['rule'] == checks.GROUND_RULE)
+        self.assertEqual((check['ok'], check['detail']), (True, '1 monuments stand as the game stands them'))
+
 
 class StandingTest(unittest.TestCase):
     """What `describe` measures of the power line towers and of the ways down to the train tunnels."""
@@ -2583,6 +2712,22 @@ class NextUpdateTest(Isolated):
             json.dump(rows, handle)
         self.assertEqual([row['utc'] for row in staging.seen()], ['2026-11-05T19:58:00Z'])
         self.assertIsNone(staging.released(self.at('2026-11-05 20:00')))
+
+    def test_on_windows_a_click_in_the_window_cannot_pause_a_run(self):
+        from unittest import mock
+        from rustmapgen import __main__ as cli, game
+        calls = []
+        with mock.patch.object(game, '_quick_edit', side_effect=lambda mode=None: calls.append(mode) or (0x1f7 if mode is None else mode)), \
+                mock.patch.object(cli.os, 'name', 'nt'):
+            restore = cli._still_window()
+            self.assertEqual(calls, [None])              # turned off for the run
+            restore()
+        self.assertEqual(calls, [None, 0x1f7])           # and the window's own setting given back
+        calls.clear()
+        with mock.patch.object(game, '_quick_edit', side_effect=lambda mode=None: calls.append(mode)), mock.patch.object(cli.os, 'name', 'nt'):
+            cli._still_window()()                         # no console window (output to a file): nothing to give back
+        self.assertEqual(calls, [None])
+        self.assertIsNone(cli._still_window()())          # not Windows: nothing at all
 
     def test_an_install_ends_with_lines_a_person_reads(self):
         import contextlib

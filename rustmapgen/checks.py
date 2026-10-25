@@ -13,10 +13,19 @@ The limits stand a little outside the worst values measured on maps people play 
 """
 import json
 
+import numpy as np
+
 from . import analyze, paths
 
 STRUCTURE = {'max_grade': 0.33, 'max_turn_deg': 36.0, 'side_max_grade': 0.43, 'side_max_turn_deg': 40.0,
              'lowest_rail_m': -1.0, 'sea_tag_agrees': 0.99, 'ground_off_m': 2.5,
+             # A monument's own ground may be off its usual height by more than `ground_patch_m` on no more
+             # than `ground_patch_m2` (analyze.ground_grid). A Launch Site seen floating in the game on
+             # 2026-10-25 had over 8,000 m² more than 5 m low; in 400 maps 29 Launch Sites were over the
+             # limit, other large monuments 1 in 400 or none. Off on more than `ground_patch_share` of its
+             # ground, the monument itself has changed (a game update), not its neighbours: the usual
+             # ground is then out of date, and the map is not turned down for it.
+             'ground_patch_m': 5.0, 'ground_patch_m2': 400, 'ground_patch_share': 0.4,
              # A power line tower may stand this far above where the game puts one. The game lays the
              # line before a small cave cuts its hollow, and a tower over the hollow keeps its height:
              # its legs hang in the air. 99 towers in 100 stand within 0.9 m.
@@ -42,6 +51,30 @@ def load_reference():
             return json.load(handle)
     except (OSError, ValueError):
         return {}
+
+
+# Each monument's usual ground, measured on many maps by the authors (scripts/ground_shapes.py) and
+# made again when a game update changes monuments.
+GROUND_SHAPES = 'ground.npz'
+
+
+def load_ground_shapes(path=None):
+    """{prefab: {'usual', 'own', 'radius'}}; empty when the table is missing or unreadable."""
+    try:
+        with np.load(path or paths.package(GROUND_SHAPES)) as table:
+            prefabs = sorted(key[:-len(':usual')] for key in table.files if key.endswith(':usual'))
+            return {prefab: {'usual': table[f'{prefab}:usual'].astype(np.float32), 'own': table[f'{prefab}:own'].astype(bool),
+                             'radius': int(table[f'{prefab}:radius'])} for prefab in prefabs}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def ground_shape(grids):
+    """(usual, own) of a monument from its grids on many maps: the middle value of each cell, and the
+    cells where nine maps in ten agree with it within a metre (its own ground, which it levels itself)."""
+    stack = np.stack(grids).astype(np.float32)
+    usual = np.median(stack, axis=0)
+    return usual, np.percentile(np.abs(stack - usual), 90, axis=0) < 1.0
 
 
 def structure(facts, reference=None):
@@ -82,9 +115,24 @@ def structure(facts, reference=None):
         off = [(abs(item['ground_m'] - yardstick[item['prefab']]), item) for item in facts['monuments']
                if 'ground_m' in item and item['prefab'] in yardstick]
         bad = sorted(((gap, item) for gap, item in off if gap > STRUCTURE['ground_off_m']), key=lambda row: -row[0])
-        add(GROUND_RULE, not bad,
-            f'{len(off)} monuments stand as the game stands them' if not bad else
-            ', '.join(f"{item['label']} {item['ground_m'] - yardstick[item['prefab']]:+.1f} m" for _, item in bad[:5]))
+        # The whole ground of each monument (analyze.ground_patches), on a map measured with the usual grounds.
+        shaped = [(max(item['ground_low_m2'], item['ground_high_m2']), item) for item in facts['monuments'] if item.get('ground_own_m2')]
+        share = STRUCTURE['ground_patch_share']
+        cut = sorted(((area, item) for area, item in shaped if STRUCTURE['ground_patch_m2'] < area <= share * item['ground_own_m2']),
+                     key=lambda row: -row[0])
+        changed = sorted({item['label'] for area, item in shaped if area > share * item['ground_own_m2']})
+        # The two halves know different monuments (reference.json, ground.npz): each one is counted once.
+        checked = len({id(item) for _, item in off} | {id(item) for _, item in shaped})
+        detail = (f'{checked} monuments stand as the game stands them' + (f' ({len(shaped)} looked at on all of their ground)' if shaped else '')
+                  if not bad and not cut else
+                  ', '.join([f"{item['label']} {item['ground_m'] - yardstick[item['prefab']]:+.1f} m" for _, item in bad[:5]]
+                            + [f"{item['label']}: {area:,} m² of its ground more than {STRUCTURE['ground_patch_m']:g} m "
+                               + ('lower (it floats there)' if item['ground_low_m2'] >= item['ground_high_m2'] else 'higher (it is buried there)')
+                               for area, item in cut[:5]]))
+        if changed:
+            detail += (f"; the game has changed {', '.join(changed)} since RustMapGen measured {'its' if len(changed) == 1 else 'their'} "
+                       'ground: not counted (a newer RustMapGen brings new measurements)')
+        add(GROUND_RULE, not bad and not cut, detail)
     towers = facts.get('towers') or {}
     if towers.get('count'):
         limit = STRUCTURE['tower_air_m']

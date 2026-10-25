@@ -3,6 +3,24 @@
 What is new in each release of RustMapGen, newest first. **Updates → What is new** in the panel
 opens this page.
 
+## 0.2.1 · 2026-10-25
+
+- **Monuments on the ground** now looks at the whole ground a monument levels for itself, not only
+  the ground under its middle. A monument placed next to another can cut that ground down or raise
+  it, far past the space the game places it in: a Launch Site was seen in the game with one end up to
+  6 m in the air beside a Power Plant, while its middle stood as usual. A map now fails when more than
+  400 m² of a monument's ground is more than 5 m lower or higher than where that monument usually
+  stands, and the check names the monument and whether it floats or is buried there. The game does
+  this by itself too: 2 of 24 maps it made with nothing changed fail the check. The usual grounds of
+  41 monuments come with RustMapGen, measured on 324 maps. Maps made before this version keep their
+  earlier result until checked again (`recheck <map>` on the command line). A monument the game
+  itself has changed since those measurements (a forced wipe) is said and not counted, until a newer
+  RustMapGen brings new ones.
+- **Windows:** a click in RustMapGen's window no longer stops it. Windows starts a text selection
+  there, and until Esc every line the panel or a command writes waits, the work too (an update of the
+  panel could stand still half way so). That click-to-select is off while RustMapGen runs, and back
+  as it was afterwards.
+
 ## 0.2.0 · 2026-10-22
 
 - **The forced wipe's update** (the first Thursday of the month) changes how maps are made. From

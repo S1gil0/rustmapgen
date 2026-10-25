@@ -279,6 +279,44 @@ def _grounding(world, monuments):
             item['ground_m'] = round(float(item['y'] - height[j, i]), 1)
 
 
+# The ground a monument levels for itself reaches well beyond the box the game places it by (the
+# Launch Site's box is 400 x 200 m, its ground runs about 280 m from its middle), so a neighbour
+# placed after it can cut that ground down or raise it: on a map in play on 2026-10-25 the end of a
+# Launch Site that faced the Power Plant stood up to 6 m over the ground. Under its pivot all was as
+# usual, so `ground_m` cannot see it; the whole ground is compared with the usual one instead
+# (ground.npz, checks.load_ground_shapes), on a grid in the monument's own frame.
+GROUND_STEP = 4.0
+
+
+def ground_grid(height, size, item, radius, step=GROUND_STEP):
+    """The terrain minus a monument's own height, on a square grid of `step` metres in its frame (x along its turn)."""
+    last = height.shape[0] - 1
+    scale, half = last / float(size), size * 0.5
+    axis = np.arange(-radius, radius + step / 2, step)
+    u, v = np.meshgrid(axis, axis)
+    turn = math.radians(item['turn'])
+    x = item['x'] + u * math.cos(turn) + v * math.sin(turn)
+    z = item['z'] - u * math.sin(turn) + v * math.cos(turn)
+    i = np.clip(np.rint((x + half) * scale).astype(int), 0, last)
+    j = np.clip(np.rint((z + half) * scale).astype(int), 0, last)
+    return (height[j, i] - item['y']).astype(np.float32)
+
+
+def ground_patches(world, monuments, shapes, off_m):
+    """Give each monument whose usual ground is in `shapes` how much of that ground is more than `off_m` lower
+    here (`ground_low_m2`: what stands there floats) or higher (`ground_high_m2`: it is buried), and its size."""
+    height = world.metres('height')
+    for item in monuments:
+        shape = shapes.get(item['prefab'])
+        if not shape or item['folder'] in OFF_GROUND:
+            continue
+        dev = ground_grid(height, world.size, item, shape['radius']) - shape['usual']
+        own, cell = shape['own'], GROUND_STEP ** 2
+        item['ground_low_m2'] = int((own & (dev < -off_m)).sum() * cell)
+        item['ground_high_m2'] = int((own & (dev > off_m)).sum() * cell)
+        item['ground_own_m2'] = int(own.sum() * cell)
+
+
 def _surface(world):
     """The ground under a point, in metres: the terrain with the cliff models on it, between its four samples."""
     height = world.metres('height')

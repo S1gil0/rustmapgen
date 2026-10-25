@@ -134,7 +134,9 @@ A map is checked as soon as it is made, on the file a server would load, in thre
 - **Can it be played:** what any map must show. The rail ring is closed with nothing cut off from it,
   the rails are not too steep and stay above the water, sea and land are tagged as the heights say,
   monuments and power line towers stand on the ground, and every tunnel entrance leads into the
-  tunnels.
+  tunnels. A monument stands on the ground only when all the ground it levels for itself is where it
+  usually is: a neighbour placed after it can cut part of it down or raise it, leaving one end in the
+  air.
 - **Is it what was asked:** your settings, checked against the result. The monuments you wanted are
   there and the ones you blocked are not, the land is the share you asked for, the rail ring and the
   Outpost are as you set them, and your templates were merged whole.

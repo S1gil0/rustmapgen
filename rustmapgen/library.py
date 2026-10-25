@@ -208,6 +208,7 @@ def add(name, names=None, remerge=False):
         load_test = dict(load_test, state='stale', reason='the load test was of other bytes')
     merge = _merge(folder, recipe, names, world, fresh, map_sha256)
     facts = analyze.describe(world, names)
+    analyze.ground_patches(world, facts['monuments'], checks.load_ground_shapes(), checks.STRUCTURE['ground_patch_m'])
     facts['blocked_extra'] = _blocked_present(world, names, recipe.get('block_extra'))
     lines = facts.pop('lines')
     files = render.save(world, folder)

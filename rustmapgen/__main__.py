@@ -237,7 +237,22 @@ def presets():
     return sorted(name[:-len('.json')] for name in os.listdir(folder) if name.endswith('.json'))
 
 
+def _still_window():
+    """Windows: a click in the console window starts a text selection, and while it lasts every line written there
+    waits, the program writing it too (a panel stood still half way through updating itself so). Turned off for the
+    whole run; returns what gives the window its own setting back. Elsewhere, or with no window, nothing to do."""
+    if os.name != 'nt':
+        return lambda: None
+    from .game import _quick_edit
+    try:
+        mode = _quick_edit()
+    except (OSError, AttributeError, ValueError):
+        return lambda: None
+    return (lambda: _quick_edit(mode)) if mode is not None else (lambda: None)
+
+
 if __name__ == '__main__':
+    restore = _still_window()
     try:
         main()
     except KeyboardInterrupt:
@@ -246,3 +261,5 @@ if __name__ == '__main__':
         if os.environ.get('RUSTMAPGEN_DEBUG'):
             raise
         sys.exit(f'rustmapgen: {error}')
+    finally:
+        restore()
