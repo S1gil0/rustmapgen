@@ -1,0 +1,12 @@
+{
+  "wipe": "2026-11-05",
+  "branch": "staging",
+  "checked": "Mon 2 Nov",
+  "build": "26344826",
+  "changes": [
+    "Monuments are spaced further apart, so many move and some maps have fewer of them.",
+    "The land changes with them: the same seed gives a different map, and roads, rails and power lines are rerouted.",
+    "Canyons and train tunnels are fixed. Map sizes are unchanged.",
+    "Fewer seeds pass every check on the presets that want many monuments: in a small test about 1 in 4 of the Medium preset, against 1 in 2 on the public game. Make a few more maps."
+  ]
+}

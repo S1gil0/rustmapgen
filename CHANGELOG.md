@@ -3,6 +3,15 @@
 What is new in each release of RustMapGen, newest first. **Updates → What is new** in the panel
 opens this page.
 
+## 0.2.2 · 2026-11-02
+
+- **Maps for the forced wipe of 5 November:** the authors have checked the maps of the coming update
+  on Steam's staging branch (build 26344826), so **New Map → Game** now offers **Next update** until
+  the update is out, and **What changes** opens once with what changes in the maps. On the command
+  line: `--game next`. See [Maps for the next update](README.md#maps-for-the-next-update).
+- The branch can still change before the update. If a later build changes the maps, a correction
+  follows, and maps made before it say so.
+
 ## 0.2.1 · 2026-10-25
 
 - **Monuments on the ground** now looks at the whole ground a monument levels for itself, not only

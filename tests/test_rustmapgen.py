@@ -77,11 +77,17 @@ class Isolated(unittest.TestCase):
 
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
-        self.saved = {key: os.environ.get(key) for key in ('RUSTMAPGEN_DATA', 'RUSTMAPGEN_GAME', 'RUSTMAPGEN_GAME_NEXT')}
+        self.saved = {key: os.environ.get(key) for key in ('RUSTMAPGEN_DATA', 'RUSTMAPGEN_GAME', 'RUSTMAPGEN_GAME_NEXT',
+                                                           'RUSTMAPGEN_NEXT_UPDATE')}
         os.environ['RUSTMAPGEN_DATA'] = os.path.join(self.folder.name, 'data')
         os.environ['RUSTMAPGEN_GAME'] = os.path.join(self.folder.name, 'game')
         os.environ['RUSTMAPGEN_GAME_NEXT'] = os.path.join(self.folder.name, 'game-next')
+        self.undeclare()
         paths.ensure_data()
+
+    def undeclare(self):
+        """No next update declared, whatever this release ships: a test declares its own."""
+        os.environ['RUSTMAPGEN_NEXT_UPDATE'] = os.path.join(self.folder.name, 'nothing-declared.json')
 
     def tearDown(self):
         for key, value in self.saved.items():
@@ -2403,8 +2409,8 @@ class NextUpdateTest(Isolated):
         for broken in ({'wipe': '2026-11-06'}, {'branch': 'beta'}, {'changes': 'one line'}, {'changes': []}):
             self.declare(**broken)
             self.assertIsNone(staging.declared(when), broken)
-        os.environ.pop('RUSTMAPGEN_NEXT_UPDATE')
-        self.assertIsNone(staging.declared(when))      # this copy ships none
+        self.undeclare()
+        self.assertIsNone(staging.declared(when))
         os.environ[staging.OVERRIDE] = '1'
         self.addCleanup(os.environ.pop, staging.OVERRIDE, None)
         self.assertIsNone(staging.refusal(when))       # for testing, on any day
@@ -2697,7 +2703,7 @@ class NextUpdateTest(Isolated):
             update.assert_called_once_with('public', quiet)
         # A public branch said to be set later than now is not believed.
         os.unlink(paths.data(staging.SEEN))
-        os.environ.pop('RUSTMAPGEN_NEXT_UPDATE')
+        self.undeclare()
         staging.remember({'public': '200', 'public_updated': unix('2026-11-05 21:00')}, self.at('2026-11-05 19:58'))
         with mock.patch.object(game, 'update_game') as update:
             game.catch_up(quiet, self.at('2026-11-05 20:00'))
@@ -2754,7 +2760,7 @@ class NextUpdateTest(Isolated):
             update.assert_not_called()                 # no steamcmd run that could only fail and leave the game "updating"
         self.declare()
         self.assertIn('the forced wipe of Thu 5 Nov is over', staging.refusal(self.at('2026-11-06 09:00')))
-        os.environ.pop('RUSTMAPGEN_NEXT_UPDATE')
+        self.undeclare()
         self.assertIn('come with an update of RustMapGen', staging.refusal(self.at('2026-11-06 09:00')))
 
     def test_a_load_test_and_the_update_before_it_go_in_together_or_not_at_all(self):
