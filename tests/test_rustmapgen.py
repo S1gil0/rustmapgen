@@ -1574,6 +1574,22 @@ class BranchTest(Isolated):
         self.assertFalse(os.path.exists(paths.game(runner.UPDATING)))
         self.assertEqual(runner.game_branch(), 'public')
 
+    def test_a_build_steam_no_longer_lists_is_updated_with_its_record_put_aside(self):
+        # After a forced wipe steamcmd stops on "Access Denied" while its record of the old build is there, on the same branch.
+        self.installed_on('public')
+        good = textwrap.dedent(self.STEAMCMD)
+        denied = good.replace('mkdir -p', 'if [ "$(cat "$DIR/../manifest-seen")" = present ]; then '
+                              'echo "Error! App \'258550\' state is 0x6 after update job."; exit 8; fi\n        mkdir -p')
+        with open(self.game.steamcmd_program(), 'w') as handle:
+            handle.write(denied)
+        said = []
+        self.game.update_game(say=lambda *a, **k: said.append(' '.join(map(str, a))))
+        self.assertEqual(self.seen(), 'absent')
+        self.assertEqual((runner.game_branch(), runner.game_build(), runner.game_state()), ('public', '200', '4'))
+        self.assertEqual(sorted(os.listdir(paths.game('steamapps'))), ['appmanifest_258550.acf'])
+        self.assertFalse(os.path.exists(paths.game(runner.UPDATING)))
+        self.assertTrue(any('put aside' in line for line in said))
+
     def test_an_update_that_exits_with_an_error_is_not_taken_for_finished(self):
         self.installed_on('public')
         with open(paths.game('RustDedicated'), 'w') as handle:
@@ -1738,12 +1754,15 @@ class BranchTest(Isolated):
             self.game.update_game(say=lambda *a, **k: None)
         self.assertEqual(len(passes), 3)
         self.assertTrue(os.path.exists(paths.game(runner.UPDATING)))
-        with open(paths.game('steamapps', 'appmanifest_258550.acf')) as handle:
+        aside = [name for name in os.listdir(paths.game('steamapps')) if name.startswith('appmanifest_258550.acf.public-')]
+        self.assertEqual(len(aside), 1)        # put aside after the first pass, in case Steam no longer lists build 100
+        with open(paths.game('steamapps', aside[0])) as handle:
             record = handle.read()
         with open(paths.game('steamapps', 'appmanifest_258550.acf'), 'w') as handle:
-            handle.write(record.replace('"100"', '"200"'))
+            handle.write(record.replace('"100"', '"200"'))  # what steamcmd writes once it has the build
         self.assertEqual(self.game.update_game(say=lambda *a, **k: None), '200')
         self.assertFalse(os.path.exists(paths.game(runner.UPDATING)))
+        self.assertEqual(os.listdir(paths.game('steamapps')), ['appmanifest_258550.acf'])  # the old record is cleared
 
     def test_an_update_on_the_same_branch_keeps_its_record(self):
         self.installed_on('public')
@@ -2614,7 +2633,12 @@ class NextUpdateTest(Isolated):
         self.addCleanup(setattr, staging, '_public', None)
         saved = os.environ['RUSTMAPGEN_GAME']
         self.addCleanup(os.environ.__setitem__, 'RUSTMAPGEN_GAME', saved)
-        self.declare()
+        import datetime                 # the commands run on the real clock: a forced wipe still to come, whatever the day
+        today = datetime.datetime.now(datetime.timezone.utc).date()
+        wipe = staging.first_thursday(today.year, today.month)
+        if wipe <= today:
+            wipe = staging.first_thursday(*((today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)))
+        self.declare(wipe=wipe.isoformat())
         done = []
         # A map of the next update load tested on the public game: the public game is brought to Steam's newest first.
         name = 'small-2000-4242-20261021-224813-b6bf9d'

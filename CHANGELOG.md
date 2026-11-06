@@ -3,6 +3,15 @@
 What is new in each release of RustMapGen, newest first. **Updates → What is new** in the panel
 opens this page.
 
+## 0.2.3 · 2026-11-06
+
+- **The game updates again after the forced wipe.** Once the update of 5 November was out, Steam no
+  longer lists the build most installs were on, and steamcmd stopped with "Access Denied" when asked
+  to update from it. The update failed, and maps could not be made until it finished. RustMapGen now
+  puts steamcmd's record of the old install aside and tries again, as it already did when moving to
+  another branch: only the files that differ are fetched. Update RustMapGen, then make a map or run
+  **Update the game** as usual.
+
 ## 0.2.2 · 2026-11-02
 
 - **Maps for the forced wipe of 5 November:** the authors have checked the maps of the coming update

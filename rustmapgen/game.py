@@ -274,6 +274,15 @@ def update_game(branch=None, say=print):
         say((f'  steamcmd ended with {code}' if code else '  steamcmd ended without its word that the game is in place' if out is not None
              else '  the game\'s record does not show the build Steam has yet')
             + '; on its first start it updates itself and often ends so: running it again to check', flush=True)
+        # Once Steam no longer lists the installed build (after a forced wipe), steamcmd stops on "Access Denied" for the
+        # new build's manifests, on the same branch too, and says so only in its own log. Its record of the install is then
+        # put aside as for a change of branch: `validate` fetches only what differs. Every pass validates anyway, so a
+        # failure for another reason costs nothing more.
+        if aside is None and os.path.isfile(manifest):
+            aside = f'{manifest}.{was or "unknown"}-{time.strftime("%Y%m%d%H%M%S", time.gmtime())}'
+            os.replace(manifest, aside)
+            say('  steamcmd\'s record of the install is put aside for the next pass (it stops on it once Steam no longer '
+                'lists the installed build)', flush=True)
     else:
         kept = f' (the record of the {was} install was put aside as {aside})' if aside else ''
         raise RuntimeError(f'steamcmd did not install the game{kept}. Its last words:\n' + last)
@@ -282,8 +291,11 @@ def update_game(branch=None, say=print):
         raise RuntimeError(f'steamcmd said it finished, but its record of the game reads branch {runner.game_branch()}, build '
                            f'{runner.game_build()}, state {runner.game_state()} (a whole install on {wanted} reads state 4); '
                            'run the update again')
-    if aside:
-        os.unlink(aside)
+    # The record put aside, and any an update that did not finish left there before: the game is whole again.
+    folder, name = os.path.split(manifest)
+    for left in os.listdir(folder):
+        if left.startswith(name + '.'):
+            os.unlink(os.path.join(folder, left))
     os.unlink(updating)
     build = runner.game_build()
     say(f'game build {build} ({runner.game_branch()})' + (f', was {before}' if before and before != build else ''), flush=True)
